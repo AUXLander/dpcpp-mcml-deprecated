@@ -169,7 +169,7 @@ struct tracker
 			{
 				case combine_mode_e::COMBINE_ADD:
 				{
-					for (auto [key, value] : rhs.__heathash)
+					for (auto& [key, value] : rhs.__heathash)
 					{
 						auto [it, inserted] = __heathash.try_emplace(key, 0U);
 
@@ -188,7 +188,7 @@ struct tracker
 
 			std::deque<dot_counter_t> __heatmap(DPI_X * DPI_Y * DPI_Z * layers_count, 0U);
 
-			for (const auto [key, value] : __heathash)
+			for (const auto& [key, value] : __heathash)
 			{
 				const auto index = key.to_index();
 

@@ -37,7 +37,7 @@ double Rspecular(LayerStruct* Layerspecs_Ptr)
 
 
 PhotonStruct::PhotonStruct(InputStruct& cfg) :
-	In_Ptr{ cfg }, input(cfg), track()
+	In_Ptr{ cfg }, input{ cfg }, track()
 {;}
 
 /***********************************************************
@@ -192,7 +192,7 @@ void PhotonStruct::drop(OutStruct& output)
 	w -= dwa;
 
 	/* assign dwa to the absorption array element. */
-	output.A_rz[ir][iz] += dwa;
+ 	output.A_rz.on(ir,iz) += dwa;
 }
 
 
@@ -206,7 +206,7 @@ void PhotonStruct::record_t(double reflectance, OutStruct& output)
 	ia = static_cast<size_t>(std::acos(uz) / input.da);
 	ia = std::min<size_t>(ia, input.na - 1);
 
-	output.Tt_ra[ir][ia] += w * (1.0 - reflectance);
+	output.Tt_ra.on(ir,ia) += w * (1.0 - reflectance);
 
 	w *= reflectance;
 }
@@ -221,7 +221,7 @@ void PhotonStruct::record_r(double reflectance, OutStruct& output)
 	ia = static_cast<size_t>(std::acos(-uz) / input.da);
 	ia = std::min<size_t>(ia, input.na - 1);
 
-	output.Rd_ra[ir][ia] += w * (1.0 - reflectance);
+	output.Rd_ra.on(ir,ia) += w * (1.0 - reflectance);
 
 	w *= reflectance;
 }

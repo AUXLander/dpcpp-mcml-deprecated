@@ -21,12 +21,12 @@ FILE* GetFile(char*);
 short ReadNumRuns(FILE*);
 void ReadParm(FILE*, InputStruct*);
 void CheckParm(FILE*, InputStruct*);
-void InitOutputData(InputStruct, OutStruct*);
-void FreeData(InputStruct, OutStruct*);
+//void InitOutputData(InputStruct, OutStruct*);
+//void FreeData(InputStruct, OutStruct*);
 //double Rspecular(LayerStruct*);
-void hop_drop_spin(InputStruct*, PhotonStruct*, OutStruct&);
-void SumScaleResult(InputStruct, OutStruct&);
-void WriteResult(InputStruct, const OutStruct&, char*);
+//void hop_drop_spin(InputStruct*, PhotonStruct*, OutStruct&);
+void SumScaleResult(const InputStruct&, OutStruct&);
+void WriteResult(const InputStruct&, const OutStruct&, char*);
 
 
 /***********************************************************
@@ -108,7 +108,7 @@ void PredictDoneTime(long P1, long Pt)
 /***********************************************************
  *	Report time and write results.
  ****/
-void ReportResult(InputStruct In_Parm, OutStruct& Out_Parm)
+void ReportResult(InputStruct& In_Parm, OutStruct& Out_Parm)
 {
 	char time_report[STRLEN];
 
@@ -138,13 +138,11 @@ void GetFnameFromArgv(int argc, const char* argv[], char* input_filename)
  ****/
 void DoOneRun(short NumRuns, InputStruct& In_Ptr)
 {
-	OutStruct out_parm(In_Ptr);
 	PhotonStruct photon(In_Ptr);
 	
 	long num_photons = In_Ptr.num_photons;
 	long photon_rep = 10;
 
-	out_parm.Rsp = Rspecular(In_Ptr.layerspecs);
 
 	long photon_idx = num_photons; // photon index
 
@@ -182,28 +180,98 @@ void DoOneRun(short NumRuns, InputStruct& In_Ptr)
 		stream.write((const char*)&reserved, sizeof(reserved));
 	});
 
+	constexpr size_t N = 1024;
 
-	for (; photon_idx > 0; --photon_idx)
+	constexpr size_t GROUP_SIZE = 8; // почему большее количество не создается?? 
+	constexpr size_t GROUP_COUNT = (N / GROUP_SIZE);
+
 	{
-		if (num_photons - photon_idx == photon_rep)
+		OutStruct out_parm(In_Ptr);
+
+		out_parm.Rsp = Rspecular(In_Ptr.layerspecs);
+
+		//sycl::property_list props{ sycl::property::queue::enable_profiling() };
+
+		//sycl::queue gpu_queue(
+		//	sycl::gpu_selector{},
+
+		//	[](sycl::exception_list exceptions) 
+		//	{
+		//		for (auto& exception : exceptions)
+		//		{
+		//			try
+		//			{
+		//				std::rethrow_exception(exception);
+		//			}
+		//			catch (sycl::exception& exception)
+		//			{
+		//				std::cerr << "Asynch error: " << exception.what() << std::endl;
+		//			}
+		//		}
+		//	},
+
+		//	props
+		//);
+
+		//sycl::event event = gpu_queue.submit(
+
+		//	[&](sycl::handler& cgh) 
+		//	{
+		//		sycl::stream output(1024, 80, cgh);
+
+		//		auto work_items = sycl::nd_range<2>(sycl::range<2>(12, 12), sycl::range<2>(4, 4));
+
+		//		cgh.parallel_for(
+		//			sycl::nd_range<1>(
+		//				sycl::range<1>(N), 
+		//				sycl::range<1>(GROUP_SIZE)
+		//			),
+
+		//			[=](sycl::nd_item<1> nd_item) // Наибольшее количество информации о work group
+		//			{
+		//				const size_t global_index = nd_item.get_global_id(0);
+		//				const size_t local_index = nd_item.get_local_id(0);
+
+		//				// загружаем данные из глобальной в локальную память, при этом barrier препятствует data race, т.е. все потоки дождутся, пока не дойдут до этого места.
+		//				// в данном случае это не обязательно
+		//				nd_item.barrier(sycl::access::fence_space::local_space);
+
+		//				output << "Device index: " << global_index << sycl::endl;
+		//				output << "Worker index: " << local_index  << sycl::endl;
+		//			});
+		//	}
+
+		//);
+
+		//gpu_queue.wait();
+
+		//uint64_t start = event.get_profiling_info<sycl::info::event_profiling::command_start>();
+		//uint64_t end = event.get_profiling_info<sycl::info::event_profiling::command_end>();
+
+		//std::cout << "Kernel execution time: " << (end - start) << " ns" << std::endl;
+
+		for (; photon_idx > 0; --photon_idx)
 		{
-			printf("%ld photons & %d runs left, ", photon_idx, NumRuns);
-			PredictDoneTime(num_photons - photon_idx, num_photons);
-			photon_rep *= 10;
+			if (num_photons - photon_idx == photon_rep)
+			{
+				printf("%ld photons & %d runs left, ", photon_idx, NumRuns);
+				PredictDoneTime(num_photons - photon_idx, num_photons);
+				photon_rep *= 10;
+			}
+
+			photon.init(out_parm.Rsp, In_Ptr.layerspecs);
+
+			do
+			{
+				photon.hop_drop_spin(out_parm);
+			}
+			while (!photon.dead);
 		}
 
-		photon.init(out_parm.Rsp, In_Ptr.layerspecs);
+		g.write();
 
-		do
-		{
-			photon.hop_drop_spin(out_parm);
-		}
-		while (!photon.dead);
+		ReportResult(In_Ptr, out_parm);
 	}
-
-	g.write();
-
-	ReportResult(In_Ptr, out_parm);
 
 	In_Ptr.free();
 }
@@ -217,7 +285,7 @@ int main(const int argc, const char* argv[])
 		"F:\\UserData\\Projects\\LightTransport\\build\\wcy_lo.mci"
 	};
 
-	get_devices_information();
+	// get_devices_information();
 
 	char input_filename[STRLEN];
 
@@ -232,6 +300,8 @@ int main(const int argc, const char* argv[])
 	input_file_ptr = GetFile(input_filename);
 	CheckParm(input_file_ptr, &in_parm);
 	num_runs = ReadNumRuns(input_file_ptr);
+
+	in_parm.initialize();
 
 	while (num_runs--)
 	{
