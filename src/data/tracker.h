@@ -16,6 +16,7 @@
 
 #include <boost/functional/hash.hpp>
 
+
 enum : size_t
 {
 	DPI_X = 10U,

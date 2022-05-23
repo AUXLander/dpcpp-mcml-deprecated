@@ -14,6 +14,7 @@
 #endif
 
 #include "mcml.hpp"
+#include "dpcpp/utils.hpp"
 
 /*	Declare before they are used in main(). */
 FILE* GetFile(char*);
@@ -182,10 +183,8 @@ void DoOneRun(short NumRuns, InputStruct& In_Ptr)
 	});
 
 
-	//#pragma omp parallel for
-	//for (intptr_t photon_idx = 0; photon_idx < num_photons; ++photon_idx)
-	do {
-
+	for (; photon_idx > 0; --photon_idx)
+	{
 		if (num_photons - photon_idx == photon_rep)
 		{
 			printf("%ld photons & %d runs left, ", photon_idx, NumRuns);
@@ -201,7 +200,6 @@ void DoOneRun(short NumRuns, InputStruct& In_Ptr)
 		}
 		while (!photon.dead);
 	}
-	while (--photon_idx);
 
 	g.write();
 
@@ -218,6 +216,8 @@ int main(const int argc, const char* argv[])
 		argv[0],
 		"F:\\UserData\\Projects\\LightTransport\\build\\wcy_lo.mci"
 	};
+
+	get_devices_information();
 
 	char input_filename[STRLEN];
 
