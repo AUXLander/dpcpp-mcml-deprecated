@@ -37,12 +37,13 @@ struct PhotonStruct
 	double step_size{0};
 	double sleft{0};
 
-	InputStruct& In_Ptr;
-	InputStruct& input;
+	const InputStruct& input;
+
+	OutStruct& output;
 
 	tracker::local_thread_storage track;
 
-	PhotonStruct(InputStruct& cfg);
+	PhotonStruct(const InputStruct&, OutStruct&);
 
 	~PhotonStruct()
 	{
@@ -60,7 +61,7 @@ struct PhotonStruct
 	void step_size_in_glass();
 	bool hit_boundary();
 	void roulette();
-	void record_r(double	Refl /* reflectance. */, OutStruct& Out_Ptr);
+	void record_r(double Refl, OutStruct& Out_Ptr);
 	void record_t(double Refl, OutStruct& Out_Ptr);
 	void drop(OutStruct& Out_Ptr);
 
@@ -74,9 +75,8 @@ struct PhotonStruct
 
 	LayerStruct& get_current_layer()
 	{
-		assert(In_Ptr.layerspecs);
-		//assert(In_Ptr.num_layers > layer);
+		assert(input.layerspecs);
 
-		return In_Ptr.layerspecs[layer];
+		return input.layerspecs[layer];
 	}
 };

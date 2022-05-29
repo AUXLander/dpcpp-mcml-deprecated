@@ -136,15 +136,15 @@ void GetFnameFromArgv(int argc, const char* argv[], char* input_filename)
 /***********************************************************
  *	Execute Monte Carlo simulation for one independent run.
  ****/
-void DoOneRun(short NumRuns, InputStruct& In_Ptr)
+void DoOneRun(short NumRuns, InputStruct& input)
 {
-	OutStruct out_parm(In_Ptr);
-	PhotonStruct photon(In_Ptr);
+	OutStruct output(input);
+	PhotonStruct photon(input, output);
 	
-	long num_photons = In_Ptr.num_photons;
+	long num_photons = input.num_photons;
 	long photon_rep = 10;
 
-	out_parm.Rsp = Rspecular(In_Ptr.layerspecs);
+	output.Rsp = Rspecular(input.layerspecs);
 
 	long photon_idx = num_photons; // photon index
 
@@ -161,10 +161,10 @@ void DoOneRun(short NumRuns, InputStruct& In_Ptr)
 	g.set_headers([&](std::fstream& stream) {
 
 		// num of layers
-		stream.write((const char*)&In_Ptr.num_layers, sizeof(In_Ptr.num_layers));
+		stream.write((const char*)&input.num_layers, sizeof(input.num_layers));
 
 		// num of photons
-		stream.write((const char*)&In_Ptr.num_photons, sizeof(In_Ptr.num_photons));
+		stream.write((const char*)&input.num_photons, sizeof(input.num_photons));
 
 		// dpi's 
 		stream.write((const char*)&reserved, sizeof(size_t));
@@ -192,20 +192,20 @@ void DoOneRun(short NumRuns, InputStruct& In_Ptr)
 			photon_rep *= 10;
 		}
 
-		photon.init(out_parm.Rsp, In_Ptr.layerspecs);
+		photon.init(output.Rsp, input.layerspecs);
 
 		do
 		{
-			photon.hop_drop_spin(out_parm);
+			photon.hop_drop_spin(output);
 		}
 		while (!photon.dead);
 	}
 
 	g.write();
 
-	ReportResult(In_Ptr, out_parm);
+	ReportResult(input, output);
 
-	In_Ptr.free();
+	input.free();
 }
 
 
@@ -217,7 +217,7 @@ int main(const int argc, const char* argv[])
 		"F:\\UserData\\Projects\\LightTransport\\build\\wcy_lo.mci"
 	};
 
-	get_devices_information();
+	//get_devices_information();
 
 	char input_filename[STRLEN];
 

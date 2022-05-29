@@ -22,6 +22,143 @@ struct LayerStruct;
  ****/
 void nrerror(const char error_text[]);
 
+template<class T, template<typename...> class data_accessor>
+struct matrix
+{
+	using data_accessor_t = data_accessor<T>;
+
+	enum size_e : size_t
+	{
+		x = 0U,
+		y,
+		z
+	};
+
+	T* allocation(const std::vector<size_t>& size)
+	{
+		const auto unaligned_size = std::accumulate(size.begin(), size.end(), 1.0, std::multiplies<size_t>{});
+
+		return new T[unaligned_size]{ static_cast<T>(0) };
+	}
+
+private:
+
+	std::vector<size_t> __size;
+	data_accessor_t     __data;
+
+	T& at(size_t i, size_t j)
+	{
+		assert(i < __size[size_e::y]);
+		assert(j < __size[size_e::x]);
+
+		return __data[__size[size_e::x] * i + j];
+	}
+
+	const T& at(size_t i, size_t j) const
+	{
+		assert(i < __size[size_e::y]);
+		assert(j < __size[size_e::x]);
+
+		return __data[__size[size_e::x] * i + j];
+	}
+
+public:
+
+	matrix(const matrix<T, data_accessor>& other) = delete;
+
+	matrix(matrix<T, data_accessor>&& other) = delete;
+
+	matrix(size_t size_x, size_t size_y, data_accessor_t&& accessor) :
+		__size({ size_x, size_y }),
+		__data(std::move(accessor))
+	{
+
+		std::cout << &__data[0] << std::endl;
+	}
+
+	size_t size(size_t index) const
+	{
+		if (index >= __size.size())
+		{
+			return 0;
+		}
+
+		return __size[index];
+	}
+
+	std::vector<size_t> size() const
+	{
+		return __size;
+	}
+
+	T& on(size_t x, size_t y)
+	{
+		assert(x < __size[size_e::x]);
+		assert(y < __size[size_e::y]);
+
+		return __data[__size[size_e::x] * y + x];
+	}
+
+	const T& on(size_t x, size_t y) const
+	{
+		assert(x < __size[size_e::x]);
+		assert(y < __size[size_e::y]);
+
+		return __data[__size[size_e::x] * y + x];
+	}
+
+	void print(std::ostream& fd, bool skip_zeros = true)
+	{
+		auto stored_flags = fd.flags();
+
+		fd << std::fixed << std::setprecision(3);
+
+		for (size_t i = 0; i < size_y; ++i)
+		{
+			for (size_t j = 0; j < size_x; ++j)
+			{
+				if (skip_zeros && std::abs(at(i, j)) < 1e-7)
+				{
+					fd << std::setw(8) << "        " << "  ";
+				}
+				else
+				{
+					fd << std::setw(8) << at(i, j) << "  ";
+				}
+			}
+
+			fd << '\n';
+		}
+
+		fd.setf(stored_flags);
+	}
+};
+
+
+template<class T>
+struct raw_index_accessor
+{
+	T* indexed_values;
+
+	raw_index_accessor<T>(T* ptr) :
+		indexed_values(reinterpret_cast<T*>(ptr))
+	{
+		;
+	}
+
+	raw_index_accessor<T>(raw_index_accessor<T>&&) = default;
+	raw_index_accessor<T>(const raw_index_accessor<T>&) = default;
+
+	T& operator[](size_t index)
+	{
+		return indexed_values[index];
+	}
+
+	const T& operator[](size_t index) const
+	{
+		return indexed_values[index];
+	}
+};
 
 /****
  *	Input parameters for each independent run.
@@ -83,144 +220,112 @@ struct InputStruct
  ****/
 
 
+struct ResultBlock
+{
+	using T = double;
+
+	std::unique_ptr<T> data;
+
+	matrix<T, raw_index_accessor> matrix;
+
+	std::vector<T> r;
+	std::vector<T> a;
+	std::vector<T> value; // single size
+
+	ResultBlock(size_t rsz, size_t asz) :
+		data(new T[rsz * asz]{ 0.0 }),
+		matrix(rsz, asz, raw_index_accessor<T>{ data.get() }),
+		r(rsz), a(asz), value(1U, 0.0)
+	{;}
+
+	ResultBlock(size_t rsz, size_t asz, size_t r_size, size_t a_size) :
+		data(new T[rsz * asz]{ 0.0 }),
+		matrix(rsz, asz, raw_index_accessor<T>{ data.get() }),
+		r(r_size), a(a_size), value(1U, 0.0)
+	{;}
+
+	//Sum2DRd, Sum2DTt
+	void Sum2D()
+	{
+		size_t nr = matrix.size(0); // size x
+		size_t na = matrix.size(1); // size y
+
+		size_t ir, ia;
+
+		double sum;
+
+		for (ir = 0; ir < nr; ir++)
+		{
+			sum = 0.0;
+
+			for (ia = 0; ia < na; ia++)
+			{
+				sum += matrix.on(ir, ia);
+			}
+
+			this->r[ir] = sum;
+		}
+
+		for (ia = 0; ia < na; ia++)
+		{
+			sum = 0.0;
+
+			for (ir = 0; ir < nr; ir++)
+			{
+				sum += matrix.on(ir, ia);
+			}
+
+			this->a[ia] = sum;
+		}
+
+		this->value[0] = std::accumulate(r.begin(), r.end(), 0.0, std::plus<double>{});
+	}
+};
+
  //\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\
 
 struct OutStruct
 {
+	using T = double;
+
+	using vector_t = std::vector<T>;
+	using matrix_t = matrix<T, raw_index_accessor>;
+
 	using value_type = double;
 
-	using matrix = boost::numeric::ublas::matrix<value_type>;
-	using vector = std::vector<value_type>;
-
-	using unique_matrix_ptr = std::unique_ptr<matrix>;
-	using unique_vector_ptr = std::unique_ptr<vector>;
-	
-private:
-	struct matrix_adaptor
-	{
-		const unique_matrix_ptr mtx;
-
-		struct matrix_column_adaptor
-		{
-			const unique_matrix_ptr& mtx;
-
-			const size_t i;
-
-			matrix_column_adaptor(const unique_matrix_ptr& mtx, const size_t i)
-				: mtx(mtx), i(i)
-			{;}
-
-			value_type& operator[](const size_t& j)
-			{
-				return mtx->at_element(i, j);
-			}
-
-			const value_type& operator[](const size_t& j) const
-			{
-				return mtx->at_element(i, j);
-			}
-		};
-
-		matrix_adaptor(unique_matrix_ptr&& mtx_)
-			: mtx(std::move(mtx_))
-		{
-			for (auto i = 0; i < mtx->size1(); ++i)
-			{
-				for (auto j = 0; j < mtx->size2(); ++j)
-				{
-					mtx->at_element(i, j) = 0.0;
-				}
-			}
-		}
-
-		matrix_column_adaptor operator[](const size_t& i)
-		{
-			return matrix_column_adaptor(mtx, i);
-		}
-
-		matrix_column_adaptor operator[](const size_t& i) const
-		{
-			return matrix_column_adaptor(mtx, i);
-		}
-	};
+	//using vector = std::vector<value_type>;
 
 public:
-
-	struct ResultBlock
-	{
-		matrix_adaptor matrix;
-		vector r;
-		vector a;
-		value_type value;
-		
-		ResultBlock(unique_matrix_ptr&& matrix, size_t rsz, size_t asz)
-			: matrix(std::move(matrix)), r(rsz), a(asz), value(0.0)
-		{;}
-
-		//Sum2DRd, Sum2DTt
-		void Sum2D()
-		{
-			size_t nr = matrix.mtx->size1();
-			size_t na = matrix.mtx->size2();
-			size_t ir, ia;
-
-			double sum;
-
-			for (ir = 0; ir < nr; ir++)
-			{
-				sum = 0.0;
-
-				for (ia = 0; ia < na; ia++)
-				{
-					sum += this->matrix[ir][ia];
-				}
-
-				this->r[ir] = sum;
-			}
-
-			for (ia = 0; ia < na; ia++)
-			{
-				sum = 0.0;
-
-				for (ir = 0; ir < nr; ir++)
-				{
-					sum += this->matrix[ir][ia];
-				}
-
-				this->a[ia] = sum;
-			}
-
-			this->value = std::accumulate(r.begin(), r.end(), 0.0, std::plus<double>{});
-		}
-	};
 
 	value_type Rsp;
 
 	ResultBlock Rd_rblock;
 
-	matrix_adaptor& Rd_ra;
-	vector& Rd_r;
-	vector& Rd_a;
-	value_type& Rd;
+	matrix_t& Rd_ra;
+	vector_t& Rd_r;
+	vector_t& Rd_a;
+	vector_t& Rd;
 
-	matrix_adaptor A_rz;
-	vector A_z;
-	vector A_l;
-	value_type A;
+	ResultBlock A_rblock;
+
+	matrix_t& A_rz;
+	vector_t& A_z;
+	vector_t& A_l;
+	vector_t& A;
 
 	ResultBlock Tt_rblock;
 
-	matrix_adaptor& Tt_ra;
-	vector& Tt_r;
-	vector& Tt_a;
-	value_type& Tt;
+	matrix_t& Tt_ra;
+	vector_t& Tt_r;
+	vector_t& Tt_a;
+	vector_t& Tt;
 
-	OutStruct(InputStruct cfg)
-		: Rsp(0.0), A(0.0),
-		  /* Allocate the arrays and the matrices. */
-		  Rd_rblock(std::make_unique<matrix>(cfg.nr, cfg.na), cfg.nr, cfg.na), Rd_ra(Rd_rblock.matrix), Rd_r(Rd_rblock.r), Rd_a(Rd_rblock.a), Rd(Rd_rblock.value),
-		  A_rz(std::make_unique<matrix>(cfg.nr, cfg.nz)), A_z(cfg.nz), A_l(cfg.num_layers + 2),
-		  Tt_rblock(std::make_unique<matrix>(cfg.nr, cfg.na), cfg.nr, cfg.na), Tt_ra(Tt_rblock.matrix), Tt_r(Tt_rblock.r), Tt_a(Tt_rblock.a), Tt(Tt_rblock.value)
+	OutStruct(const InputStruct& cfg) : 
+		Rsp(0.0),
+		/* Allocate the arrays and the matrices. */
+		Rd_rblock(cfg.nr, cfg.na), Rd_ra(Rd_rblock.matrix), Rd_r(Rd_rblock.r), Rd_a(Rd_rblock.a), Rd(Rd_rblock.value),
+		A_rblock(cfg.nr, cfg.nz, cfg.nz, cfg.num_layers + 2), A_rz(A_rblock.matrix), A_z(A_rblock.r), A_l(A_rblock.a), A(A_rblock.value),
+		Tt_rblock(cfg.nr, cfg.na), Tt_ra(Tt_rblock.matrix), Tt_r(Tt_rblock.r), Tt_a(Tt_rblock.a), Tt(Tt_rblock.value)
 	{
 		/***********************************************************
 		 *	Allocate the arrays in OutStruct for one run, and

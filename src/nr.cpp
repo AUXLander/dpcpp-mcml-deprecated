@@ -15,8 +15,10 @@
 
 double Rspecular(LayerStruct* Layerspecs_Ptr)
 {
-	double r1, r2;
 	/* direct reflections from the 1st and 2nd layers. */
+
+	double r1;
+	double r2;
 	double temp;
 
 	temp = (Layerspecs_Ptr[0].n - Layerspecs_Ptr[1].n) / (Layerspecs_Ptr[0].n + Layerspecs_Ptr[1].n);
@@ -32,12 +34,12 @@ double Rspecular(LayerStruct* Layerspecs_Ptr)
 		r1 = r1 + (1 - r1) * (1 - r1) * r2 / (1 - r1 * r2);
 	}
 
-	return (r1);
+	return r1;
 }
 
 
-PhotonStruct::PhotonStruct(InputStruct& cfg) :
-	In_Ptr{ cfg }, input(cfg), track()
+PhotonStruct::PhotonStruct(const InputStruct& input, OutStruct& output) :
+	input{ input }, output{ output }
 {;}
 
 /***********************************************************
@@ -192,7 +194,7 @@ void PhotonStruct::drop(OutStruct& output)
 	w -= dwa;
 
 	/* assign dwa to the absorption array element. */
-	output.A_rz[ir][iz] += dwa;
+	output.A_rz.on(ir,iz) += dwa;
 }
 
 
@@ -206,7 +208,7 @@ void PhotonStruct::record_t(double reflectance, OutStruct& output)
 	ia = static_cast<size_t>(std::acos(uz) / input.da);
 	ia = std::min<size_t>(ia, input.na - 1);
 
-	output.Tt_ra[ir][ia] += w * (1.0 - reflectance);
+	output.Tt_ra.on(ir,ia) += w * (1.0 - reflectance);
 
 	w *= reflectance;
 }
@@ -221,21 +223,21 @@ void PhotonStruct::record_r(double reflectance, OutStruct& output)
 	ia = static_cast<size_t>(std::acos(-uz) / input.da);
 	ia = std::min<size_t>(ia, input.na - 1);
 
-	output.Rd_ra[ir][ia] += w * (1.0 - reflectance);
+	output.Rd_ra.on(ir,ia) += w * (1.0 - reflectance);
 
 	w *= reflectance;
 }
 
-void PhotonStruct::cross_up_or_not(OutStruct& Out_Ptr)
+void PhotonStruct::cross_up_or_not(OutStruct& output)
 {
 	// this->uz; /* z directional cosine. */
 	double uz1 = 0.0;					/* cosines of transmission alpha. always positive */
 	double r = 0.0;				/* reflectance */
-	double ni = In_Ptr.layerspecs[layer].n;
-	double nt = In_Ptr.layerspecs[layer - 1].n;
+	double ni = input.layerspecs[layer].n;
+	double nt = input.layerspecs[layer - 1].n;
 
 	/* Get r. */
-	if (-uz <= In_Ptr.layerspecs[layer].cos_crit0)
+	if (-uz <= input.layerspecs[layer].cos_crit0)
 	{
 		r = 1.0; /* total internal reflection. */
 	}
@@ -249,7 +251,7 @@ void PhotonStruct::cross_up_or_not(OutStruct& Out_Ptr)
 		if (layer == 1)
 		{
 			uz = -uz1;
-			record_r(0.0, Out_Ptr);
+			record_r(0.0, output);
 			dead = true;
 		}
 		else
@@ -274,11 +276,11 @@ void PhotonStruct::cross_down_or_not(OutStruct& output)
 	//this->uz; /* z directional cosine. */
 	double uz1 = 0.0;	/* cosines of transmission alpha. */
 	double r = 0.0;	/* reflectance */
-	double ni = In_Ptr.layerspecs[layer].n;
-	double nt = In_Ptr.layerspecs[layer + 1].n;
+	double ni = input.layerspecs[layer].n;
+	double nt = input.layerspecs[layer + 1].n;
 
 	/* Get r. */
-	if (uz <= In_Ptr.layerspecs[layer].cos_crit1)
+	if (uz <= input.layerspecs[layer].cos_crit1)
 	{
 		r = 1.0; /* total internal reflection. */
 	}
@@ -289,7 +291,7 @@ void PhotonStruct::cross_down_or_not(OutStruct& output)
 
 	if (RandomNum() > r) /* transmitted to layer+1. */
 	{
-		if (layer == In_Ptr.num_layers)
+		if (layer == input.num_layers)
 		{
 			uz = uz1;
 			record_t(0.0, output);
@@ -312,19 +314,19 @@ void PhotonStruct::cross_down_or_not(OutStruct& output)
 	}
 }
 
-void PhotonStruct::cross_or_not(OutStruct& Out_Ptr)
+void PhotonStruct::cross_or_not(OutStruct& output)
 {
 	if (this->uz < 0.0)
 	{
-		cross_up_or_not(Out_Ptr);
+		cross_up_or_not(output);
 	}
 	else
 	{
-		cross_down_or_not(Out_Ptr);
+		cross_down_or_not(output);
 	}
 }
 
-void PhotonStruct::hop_in_glass(OutStruct& Out_Ptr)
+void PhotonStruct::hop_in_glass(OutStruct& output)
 {
 	if (uz == 0.0)
 	{
@@ -335,7 +337,7 @@ void PhotonStruct::hop_in_glass(OutStruct& Out_Ptr)
 	{
 		step_size_in_glass();
 		hop(); // Move the photon s away in the current layer of medium. 
-		cross_or_not(Out_Ptr);
+		cross_or_not(output);
 	}
 }
 
@@ -385,7 +387,7 @@ void PhotonStruct::hop_drop_spin(OutStruct& output)
 		}
 	}
 
-	if (w < In_Ptr.Wth && !dead)
+	if (w < input.Wth && !dead)
 	{
 		roulette();
 	}
