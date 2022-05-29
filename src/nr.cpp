@@ -193,8 +193,10 @@ void PhotonStruct::drop()
 	
 	w -= dwa;
 
+	auto& AAA = output.A_rz.on(ir, iz);
+
 	/* assign dwa to the absorption array element. */
-	output.A_rz.on(ir,iz) += dwa;
+	AAA += dwa;
 }
 
 

@@ -650,7 +650,7 @@ void Sum2DRd(InputStruct In_Parm, OutStruct& Out_Ptr)
 		sum += Out_Ptr.Rd_r[ir];
 	}
 
-	Out_Ptr.Rd[0] = sum;
+	Out_Ptr.Rd = sum;
 }
 
 /***********************************************************
@@ -700,7 +700,7 @@ void Sum2DA(InputStruct In_Parm, OutStruct& Out_Ptr)
 		Out_Ptr.A_l[IzToLayer(iz, In_Parm)] += Out_Ptr.A_z[iz];
 	}
 
-	Out_Ptr.A[0] = sum;
+	Out_Ptr.A = sum;
 }
 
 /***********************************************************
@@ -744,7 +744,7 @@ void Sum2DTt(InputStruct In_Parm, OutStruct& Out_Ptr)
 		sum += Out_Ptr.Tt_r[ir];
 	}
 
-	Out_Ptr.Tt[0] = sum;
+	Out_Ptr.Tt = sum;
 }
 
 /***********************************************************
@@ -805,8 +805,8 @@ void ScaleRdTt(InputStruct In_Parm, OutStruct& Out_Ptr)
 	}
 
 	scale2 = 1.0 / (double)In_Parm.num_photons;
-	Out_Ptr.Rd[0] *= scale2;
-	Out_Ptr.Tt[0] *= scale2;
+	Out_Ptr.Rd *= scale2;
+	Out_Ptr.Tt *= scale2;
 }
 
 /***********************************************************
@@ -841,7 +841,7 @@ void ScaleA(InputStruct In_Parm, OutStruct& Out_Ptr)
 	for (il = 0; il <= nl + 1; il++)
 		Out_Ptr.A_l[il] *= scale1;
 
-	Out_Ptr.A[0] *= scale1;
+	Out_Ptr.A *= scale1;
 }
 
 /***********************************************************
@@ -926,11 +926,11 @@ void WriteRAT(FILE* file, const OutStruct& Out_Parm)
 	fprintf(file,
 		"%-14.6G \t#Specular reflectance [-]\n", Out_Parm.Rsp);
 	fprintf(file,
-		"%-14.6G \t#Diffuse reflectance [-]\n", Out_Parm.Rd[0]);
+		"%-14.6G \t#Diffuse reflectance [-]\n", Out_Parm.Rd);
 	fprintf(file,
-		"%-14.6G \t#Absorbed fraction [-]\n", Out_Parm.A[0]);
+		"%-14.6G \t#Absorbed fraction [-]\n", Out_Parm.A);
 	fprintf(file,
-		"%-14.6G \t#Transmittance [-]\n", Out_Parm.Tt[0]);
+		"%-14.6G \t#Transmittance [-]\n", Out_Parm.Tt);
 
 	fprintf(file, "\n");
 }

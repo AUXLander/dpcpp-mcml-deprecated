@@ -256,11 +256,11 @@ public:
  ****/
 struct InputStruct
 {
-	char	 out_fname[STRLEN];	/* output file name. */
-	char	 out_fformat;		/* output file format. */
+	char out_fname[STRLEN];	/* output file name. */
+	char out_fformat;		/* output file format. */
 							  /* 'A' for ASCII, */
 							  /* 'B' for binary. */
-	long	 num_photons; 		/* to be traced. */
+	long num_photons; 		/* to be traced. */
 	double Wth; 				/* play roulette if photon */
 							  /* weight < Wth.*/
 
@@ -297,99 +297,62 @@ struct InputStruct
 
 struct ResultBlock
 {
-	using T = double;
+	using value_t = double;
 
-	matrix<T, hash_data_accessor> matrix;
+	matrix<value_t, hash_data_accessor> matrix;
 
-	std::vector<T> r;
-	std::vector<T> a;
-	std::vector<T> value; // single size
+	std::vector<value_t> r;
+	std::vector<value_t> a;
+
+	value_t value; // single size
 
 	ResultBlock(size_t rsz, size_t asz) :
 		matrix(rsz, asz),
-		r(rsz), a(asz), value(1U, 0.0)
+		r(rsz), a(asz), value(0.0)
 	{;}
 
 	ResultBlock(size_t rsz, size_t asz, size_t r_size, size_t a_size) :
 		matrix(rsz, asz),
-		r(r_size), a(a_size), value(1U, 0.0)
+		r(r_size), a(a_size), value(0.0)
 	{;}
-
-	//Sum2DRd, Sum2DTt
-	void Sum2D()
-	{
-		size_t nr = matrix.size(0); // size x
-		size_t na = matrix.size(1); // size y
-
-		size_t ir, ia;
-
-		double sum;
-
-		for (ir = 0; ir < nr; ir++)
-		{
-			sum = 0.0;
-
-			for (ia = 0; ia < na; ia++)
-			{
-				sum += matrix.on(ir, ia);
-			}
-
-			this->r[ir] = sum;
-		}
-
-		for (ia = 0; ia < na; ia++)
-		{
-			sum = 0.0;
-
-			for (ir = 0; ir < nr; ir++)
-			{
-				sum += matrix.on(ir, ia);
-			}
-
-			this->a[ia] = sum;
-		}
-
-		this->value[0] = std::accumulate(r.begin(), r.end(), 0.0, std::plus<double>{});
-	}
 };
 
  //\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\
 
 struct OutStruct
 {
-	using T = double;
+	using value_t = double;
 
-	using vector_t = std::vector<T>;
-	using matrix_t = matrix<T, hash_data_accessor>;
+	using vector_t = std::vector<value_t>;
+	using matrix_t = matrix<value_t, hash_data_accessor>;
 
-	using value_type = double;
 
 	//using vector = std::vector<value_type>;
 
 public:
 
-	value_type Rsp;
+	value_t Rsp;
 
 	ResultBlock Rd_rblock;
 
 	matrix_t& Rd_ra;
 	vector_t& Rd_r;
 	vector_t& Rd_a;
-	vector_t& Rd;
+	value_t&  Rd;
 
 	ResultBlock A_rblock;
 
 	matrix_t& A_rz;
 	vector_t& A_z;
 	vector_t& A_l;
-	vector_t& A;
+	value_t&  A;
 
 	ResultBlock Tt_rblock;
 
 	matrix_t& Tt_ra;
 	vector_t& Tt_r;
 	vector_t& Tt_a;
-	vector_t& Tt;
+	value_t&  Tt;
 
 	OutStruct(const InputStruct& cfg) : 
 		Rsp(0.0),
