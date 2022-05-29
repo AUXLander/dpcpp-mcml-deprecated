@@ -82,6 +82,18 @@ struct raw_data_accessor : public base_data_accessor
 		const_cast<raw_data_accessor<value_t>*>(this)->get_value(i, j);
 	}
 
+	void unload_to(raw_data_accessor<value_t>& other)
+	{
+		const auto sz = std::accumulate(size.begin(), size.end(), 1.0, std::multiplies<size_t>{});
+
+		for (size_t i = 0; i < sz; ++i)
+		{
+			other.__storage[i] += __storage[i];
+
+			__storage[i] = 0;
+		}
+	}
+
 private:
 
 	std::unique_ptr<value_t[]> __storage;
@@ -144,6 +156,20 @@ struct hash_data_accessor : public base_data_accessor
 		const_cast<hash_data_accessor<value_t>*>(this)->get_value(i, j);
 	}
 
+	void unload_to(hash_data_accessor<value_t>& other)
+	{
+		other.__storage.merge(__storage);
+
+		for (auto& [key, value] : __storage)
+		{
+			auto it = other.__storage.find(key);
+
+			assert(it != other.__storage.end());
+
+			it->second += value;
+		}
+	}
+
 private:
 
 	std::unordered_map<key_t, value_t, hash_t> __storage;
@@ -169,6 +195,11 @@ struct matrix
 		data(size_x, size_y),
 		size(data.size)
 	{;}
+
+	void unload_to(matrix<value_t, data_accessor>& other)
+	{
+		data.unload_to(other.data);
+	}
 
 	size_t get_size(size_t index) const
 	{
@@ -315,6 +346,32 @@ struct ResultBlock
 		matrix(rsz, asz),
 		r(r_size), a(a_size), value(0.0)
 	{;}
+
+	void unload_to(ResultBlock& other)
+	{
+		assert(r.size() == other.r.size());
+		assert(a.size() == other.a.size());
+
+		for (size_t i = 0; i < r.size(); ++i)
+		{
+			other.r[i] += r[i];
+			r[i] = 0;
+		}
+
+		for (size_t i = 0; i < a.size(); ++i)
+		{
+			other.a[i] += a[i];
+			a[i] = 0;
+		}
+
+		assert(value == 0);
+
+		other.value = value;
+
+		value = 0;
+
+		matrix.unload_to(other.matrix);
+	}
 };
 
  //\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\
@@ -376,6 +433,13 @@ public:
 		}
 	}
 
+
+	void unload_to(OutStruct& other)
+	{
+		Rd_rblock.unload_to(other.Rd_rblock);
+		A_rblock.unload_to(other.A_rblock);
+		Tt_rblock.unload_to(other.Tt_rblock);
+	}
 };
 
 //\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\

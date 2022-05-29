@@ -180,32 +180,67 @@ void DoOneRun(short NumRuns, InputStruct& input)
 		stream.write((const char*)&reserved, sizeof(reserved));
 	});
 
-	OutStruct output(input);
-	PhotonStruct photon(input, output);
+	OutStruct global_output(input);
 
-	output.Rsp = Rspecular(input.layerspecs);
+	global_output.Rsp = Rspecular(input.layerspecs);
 
-	for (; photon_idx > 0; --photon_idx)
+	for (long step = photon_idx / 10U, group_idx = 0; group_idx < num_photons; group_idx += step)
 	{
-		if (num_photons - photon_idx == photon_rep)
+		OutStruct output(input);
+		PhotonStruct photon(input, output);
+
+		output.Rsp = global_output.Rsp;
+
+		long end = num_photons - group_idx - step;
+
+		for (; photon_idx > end; --photon_idx)
 		{
-			printf("%ld photons & %d runs left, ", photon_idx, NumRuns);
-			PredictDoneTime(num_photons - photon_idx, num_photons);
-			photon_rep *= 10;
+			if (num_photons - photon_idx == photon_rep)
+			{
+				printf("%ld photons & %d runs left, ", photon_idx, NumRuns);
+				PredictDoneTime(num_photons - photon_idx, num_photons);
+				photon_rep *= 10;
+			}
+
+			photon.init(output.Rsp, input.layerspecs);
+
+			do
+			{
+				photon.hop_drop_spin();
+			}
+			while (!photon.dead);
 		}
 
-		photon.init(output.Rsp, input.layerspecs);
-
-		do
-		{
-			photon.hop_drop_spin();
-		}
-		while (!photon.dead);
+		output.unload_to(global_output);
 	}
+
+	//OutStruct output(input);
+	//PhotonStruct photon(input, output);
+
+	//output.Rsp = Rspecular(input.layerspecs);
+
+	//for (; photon_idx > 0; --photon_idx)
+	//{
+	//	if (num_photons - photon_idx == photon_rep)
+	//	{
+	//		printf("%ld photons & %d runs left, ", photon_idx, NumRuns);
+	//		PredictDoneTime(num_photons - photon_idx, num_photons);
+	//		photon_rep *= 10;
+	//	}
+
+	//	photon.init(output.Rsp, input.layerspecs);
+
+	//	do
+	//	{
+	//		photon.hop_drop_spin();
+	//	}
+	//	while (!photon.dead);
+	//}
 
 	g.write();
 
-	ReportResult(input, output);
+	ReportResult(input, global_output);
+	//ReportResult(input, output);
 
 	input.free();
 }
