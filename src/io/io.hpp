@@ -170,19 +170,19 @@ struct matrix
 		size(data.size)
 	{;}
 
-	size_t size(size_t index) const
+	size_t get_size(size_t index) const
 	{
-		if (index >= __size.size())
+		if (index >= size.size())
 		{
 			return 0;
 		}
 
-		return __size[index];
+		return size[index];
 	}
 
-	const dimension_sizes_t& size() const
+	const dimension_sizes_t& get_size() const
 	{
-		return __size;
+		return size;
 	}
 
 	value_t& on(size_t x, size_t y)
@@ -355,7 +355,7 @@ public:
 	value_t&  Tt;
 
 	OutStruct(const InputStruct& cfg) : 
-		Rsp(Rspecular(cfg.layerspecs)),
+		Rsp(0.0),
 		/* Allocate the arrays and the matrices. */
 		Rd_rblock(cfg.nr, cfg.na), Rd_ra(Rd_rblock.matrix), Rd_r(Rd_rblock.r), Rd_a(Rd_rblock.a), Rd(Rd_rblock.value),
 		A_rblock(cfg.nr, cfg.nz, cfg.nz, cfg.num_layers + 2), A_rz(A_rblock.matrix), A_z(A_rblock.r), A_l(A_rblock.a), A(A_rblock.value),

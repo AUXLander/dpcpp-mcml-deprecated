@@ -183,6 +183,8 @@ void DoOneRun(short NumRuns, InputStruct& input)
 	OutStruct output(input);
 	PhotonStruct photon(input, output);
 
+	output.Rsp = Rspecular(input.layerspecs);
+
 	for (; photon_idx > 0; --photon_idx)
 	{
 		if (num_photons - photon_idx == photon_rep)
