@@ -196,7 +196,7 @@ void DoOneRun(short NumRuns, InputStruct& input)
 
 		do
 		{
-			photon.hop_drop_spin(output);
+			photon.hop_drop_spin();
 		}
 		while (!photon.dead);
 	}

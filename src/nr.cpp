@@ -169,7 +169,7 @@ void PhotonStruct::roulette()
 	}
 }
 
-void PhotonStruct::drop(OutStruct& output)
+void PhotonStruct::drop()
 {
 	double dwa;		/* absorbed weight.*/
 	size_t iz, ir;	/* index to z & r. */
@@ -198,7 +198,7 @@ void PhotonStruct::drop(OutStruct& output)
 }
 
 
-void PhotonStruct::record_t(double reflectance, OutStruct& output)
+void PhotonStruct::record_t(double reflectance)
 {
 	size_t ir, ia;	/* index to r & angle. */
 
@@ -213,7 +213,7 @@ void PhotonStruct::record_t(double reflectance, OutStruct& output)
 	w *= reflectance;
 }
 
-void PhotonStruct::record_r(double reflectance, OutStruct& output)
+void PhotonStruct::record_r(double reflectance)
 {
 	size_t ir, ia;
 
@@ -228,7 +228,7 @@ void PhotonStruct::record_r(double reflectance, OutStruct& output)
 	w *= reflectance;
 }
 
-void PhotonStruct::cross_up_or_not(OutStruct& output)
+void PhotonStruct::cross_up_or_not()
 {
 	// this->uz; /* z directional cosine. */
 	double uz1 = 0.0;					/* cosines of transmission alpha. always positive */
@@ -251,7 +251,7 @@ void PhotonStruct::cross_up_or_not(OutStruct& output)
 		if (layer == 1)
 		{
 			uz = -uz1;
-			record_r(0.0, output);
+			record_r(0.0);
 			dead = true;
 		}
 		else
@@ -271,7 +271,7 @@ void PhotonStruct::cross_up_or_not(OutStruct& output)
 	}
 }
 
-void PhotonStruct::cross_down_or_not(OutStruct& output)
+void PhotonStruct::cross_down_or_not()
 {
 	//this->uz; /* z directional cosine. */
 	double uz1 = 0.0;	/* cosines of transmission alpha. */
@@ -294,7 +294,7 @@ void PhotonStruct::cross_down_or_not(OutStruct& output)
 		if (layer == input.num_layers)
 		{
 			uz = uz1;
-			record_t(0.0, output);
+			record_t(0.0);
 			dead = true;
 		}
 		else
@@ -314,19 +314,19 @@ void PhotonStruct::cross_down_or_not(OutStruct& output)
 	}
 }
 
-void PhotonStruct::cross_or_not(OutStruct& output)
+void PhotonStruct::cross_or_not()
 {
 	if (this->uz < 0.0)
 	{
-		cross_up_or_not(output);
+		cross_up_or_not();
 	}
 	else
 	{
-		cross_down_or_not(output);
+		cross_down_or_not();
 	}
 }
 
-void PhotonStruct::hop_in_glass(OutStruct& output)
+void PhotonStruct::hop_in_glass()
 {
 	if (uz == 0.0)
 	{
@@ -337,17 +337,17 @@ void PhotonStruct::hop_in_glass(OutStruct& output)
 	{
 		step_size_in_glass();
 		hop(); // Move the photon s away in the current layer of medium. 
-		cross_or_not(output);
+		cross_or_not();
 	}
 }
 
-void PhotonStruct::hop_drop_spin(OutStruct& output)
+void PhotonStruct::hop_drop_spin()
 {
 	const auto& olayer = get_current_layer();
 
 	if (olayer.is_glass())
 	{
-		hop_in_glass(output);
+		hop_in_glass();
 	}
 	else
 	{
@@ -378,11 +378,11 @@ void PhotonStruct::hop_drop_spin(OutStruct& output)
 
 		if (hit)
 		{
-			cross_or_not(output);
+			cross_or_not();
 		}
 		else
 		{
-			drop(output);
+			drop();
 			spin(olayer.anisotropy);
 		}
 	}

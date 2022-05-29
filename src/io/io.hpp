@@ -6,8 +6,15 @@
 #include <memory>
 #include <numeric>
 #include <algorithm>
+#include <unordered_map>
+
+#include <array>
 
 #include <boost/numeric/ublas/matrix.hpp>
+#include <boost/functional/hash.hpp>
+
+#include <iostream>
+#include <iomanip>
 
 #define STRLEN 256		/* String length. */
 
@@ -22,59 +29,159 @@ struct LayerStruct;
  ****/
 void nrerror(const char error_text[]);
 
-template<class T, template<typename...> class data_accessor>
-struct matrix
+struct base_data_accessor
 {
-	using data_accessor_t = data_accessor<T>;
-
 	enum size_e : size_t
 	{
 		x = 0U,
 		y,
-		z
+
+		TOTAL_SIZE_LENGTH
 	};
 
-	T* allocation(const std::vector<size_t>& size)
-	{
-		const auto unaligned_size = std::accumulate(size.begin(), size.end(), 1.0, std::multiplies<size_t>{});
+	using dimension_sizes_t = std::array<size_t, TOTAL_SIZE_LENGTH>;
 
-		return new T[unaligned_size]{ static_cast<T>(0) };
+	const dimension_sizes_t size { 0U };
+
+	template<typename ...Args>
+	base_data_accessor(Args&& ...args) :
+		size({ std::forward<Args>(args)... })
+	{;}
+};
+
+template<typename T>
+struct raw_data_accessor : public base_data_accessor
+{
+	using value_t = typename T;
+
+	using pointer_t = value_t*;
+	using reference_t = value_t&;
+	using const_reference_t = const value_t&;
+
+
+	template<typename ...Args>
+	raw_data_accessor<value_t>(Args&& ...args) :
+		base_data_accessor(std::forward<Args>(args)...),
+		__storage(__allocation(size))
+	{;}
+
+	raw_data_accessor<value_t>(const raw_data_accessor<value_t>&) = delete;
+	raw_data_accessor<value_t>(raw_data_accessor<value_t>&&) = default;
+	~raw_data_accessor<value_t>() = default;
+
+	reference_t get_value(size_t i, size_t j)
+	{
+		assert(i < size[size_e::y]);
+		assert(j < size[size_e::x]);
+
+		return __storage[size[size_e::x] * i + j];
+	}
+
+	const_reference_t get_value(size_t i, size_t j) const
+	{
+		const_cast<raw_data_accessor<value_t>*>(this)->get_value(i, j);
 	}
 
 private:
 
-	std::vector<size_t> __size;
-	data_accessor_t     __data;
+	std::unique_ptr<value_t[]> __storage;
+
+	pointer_t __allocation(const dimension_sizes_t& size)
+	{
+		const auto sz = std::accumulate(size.begin(), size.end(), 1.0, std::multiplies<size_t>{});
+
+		return new T[sz]{ static_cast<T>(0) };
+	}
+};
+
+template<typename T>
+struct hash_data_accessor : public base_data_accessor
+{
+	using value_t = typename T;
+
+	using pointer_t = value_t*;
+	using reference_t = value_t&;
+	using const_reference_t = const value_t&;
+
+	using key_t = dimension_sizes_t;
+
+	struct hash_t
+	{
+		size_t operator()(const key_t& k) const
+		{
+			size_t seed = 0;
+
+			for (const auto& value : k)
+			{
+				boost::hash_combine(seed, value);
+			}
+
+			return seed;
+		}
+	};
+
+	template<typename ...Args>
+	hash_data_accessor<value_t>(Args&& ...args) :
+		base_data_accessor(std::forward<Args>(args)...)
+	{;}
+
+	hash_data_accessor<value_t>(const hash_data_accessor<value_t>&) = delete;
+	hash_data_accessor<value_t>(hash_data_accessor<value_t>&&) = default;
+	~hash_data_accessor<value_t>() = default;
+
+	reference_t get_value(size_t i, size_t j)
+	{
+		assert(i < size[size_e::y]);
+		assert(j < size[size_e::x]);
+
+		auto [it, inserted] = __storage.try_emplace(key_t({ i, j }), static_cast<value_t>(0));
+
+		return it->second;
+	}
+
+	const_reference_t get_value(size_t i, size_t j) const
+	{
+		const_cast<hash_data_accessor<value_t>*>(this)->get_value(i, j);
+	}
+
+private:
+
+	std::unordered_map<key_t, value_t, hash_t> __storage;
+};
+
+template<class T, template<typename...> class data_accessor>
+struct matrix
+{
+	using size_e = base_data_accessor::size_e;
+	using dimension_sizes_t = base_data_accessor::dimension_sizes_t;
+
+	using data_accessor_t = data_accessor<T>;
+
+private:
+
+	const dimension_sizes_t& __size;
+	data_accessor_t          __data;
 
 	T& at(size_t i, size_t j)
 	{
-		assert(i < __size[size_e::y]);
-		assert(j < __size[size_e::x]);
-
-		return __data[__size[size_e::x] * i + j];
+		return __data.get_value(i, j);
 	}
 
 	const T& at(size_t i, size_t j) const
 	{
-		assert(i < __size[size_e::y]);
-		assert(j < __size[size_e::x]);
-
-		return __data[__size[size_e::x] * i + j];
+		return __data.get_value(i, j);
 	}
 
 public:
 
 	matrix(const matrix<T, data_accessor>& other) = delete;
 
-	matrix(matrix<T, data_accessor>&& other) = delete;
+	matrix(matrix<T, data_accessor>&& other) = default;
 
-	matrix(size_t size_x, size_t size_y, data_accessor_t&& accessor) :
-		__size({ size_x, size_y }),
-		__data(std::move(accessor))
-	{
-
-		std::cout << &__data[0] << std::endl;
-	}
+	matrix(size_t size_x, size_t size_y) :
+		__data(size_x, size_y),
+		__size(__data.size)
+	{;}
 
 	size_t size(size_t index) const
 	{
@@ -86,25 +193,19 @@ public:
 		return __size[index];
 	}
 
-	std::vector<size_t> size() const
+	const dimension_sizes_t& size() const
 	{
 		return __size;
 	}
 
 	T& on(size_t x, size_t y)
 	{
-		assert(x < __size[size_e::x]);
-		assert(y < __size[size_e::y]);
-
-		return __data[__size[size_e::x] * y + x];
+		return __data.get_value(y, x);
 	}
 
 	const T& on(size_t x, size_t y) const
 	{
-		assert(x < __size[size_e::x]);
-		assert(y < __size[size_e::y]);
-
-		return __data[__size[size_e::x] * y + x];
+		return __data.get_value(y, x);
 	}
 
 	void print(std::ostream& fd, bool skip_zeros = true)
@@ -113,9 +214,9 @@ public:
 
 		fd << std::fixed << std::setprecision(3);
 
-		for (size_t i = 0; i < size_y; ++i)
+		for (size_t i = 0; i < __size[size_e::y]; ++i)
 		{
-			for (size_t j = 0; j < size_x; ++j)
+			for (size_t j = 0; j < __size[size_e::x]; ++j)
 			{
 				if (skip_zeros && std::abs(at(i, j)) < 1e-7)
 				{
@@ -131,32 +232,6 @@ public:
 		}
 
 		fd.setf(stored_flags);
-	}
-};
-
-
-template<class T>
-struct raw_index_accessor
-{
-	T* indexed_values;
-
-	raw_index_accessor<T>(T* ptr) :
-		indexed_values(reinterpret_cast<T*>(ptr))
-	{
-		;
-	}
-
-	raw_index_accessor<T>(raw_index_accessor<T>&&) = default;
-	raw_index_accessor<T>(const raw_index_accessor<T>&) = default;
-
-	T& operator[](size_t index)
-	{
-		return indexed_values[index];
-	}
-
-	const T& operator[](size_t index) const
-	{
-		return indexed_values[index];
 	}
 };
 
@@ -224,23 +299,19 @@ struct ResultBlock
 {
 	using T = double;
 
-	std::unique_ptr<T> data;
-
-	matrix<T, raw_index_accessor> matrix;
+	matrix<T, hash_data_accessor> matrix;
 
 	std::vector<T> r;
 	std::vector<T> a;
 	std::vector<T> value; // single size
 
 	ResultBlock(size_t rsz, size_t asz) :
-		data(new T[rsz * asz]{ 0.0 }),
-		matrix(rsz, asz, raw_index_accessor<T>{ data.get() }),
+		matrix(rsz, asz),
 		r(rsz), a(asz), value(1U, 0.0)
 	{;}
 
 	ResultBlock(size_t rsz, size_t asz, size_t r_size, size_t a_size) :
-		data(new T[rsz * asz]{ 0.0 }),
-		matrix(rsz, asz, raw_index_accessor<T>{ data.get() }),
+		matrix(rsz, asz),
 		r(r_size), a(a_size), value(1U, 0.0)
 	{;}
 
@@ -289,7 +360,7 @@ struct OutStruct
 	using T = double;
 
 	using vector_t = std::vector<T>;
-	using matrix_t = matrix<T, raw_index_accessor>;
+	using matrix_t = matrix<T, hash_data_accessor>;
 
 	using value_type = double;
 

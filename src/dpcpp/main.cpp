@@ -74,9 +74,9 @@ int main(int argc, char* argv[])
 	try
 	{
 		{
-			sycl::buffer<float, 1> buf_a(a.data(), a.size());
-			sycl::buffer<float, 1> buf_b(b.data(), b.size());
-			sycl::buffer<float, 1> buf_c(c.data(), c.size());
+			sycl::buffer<float, 1> buf_a(a.__storage(), a.size());
+			sycl::buffer<float, 1> buf_b(b.__storage(), b.size());
+			sycl::buffer<float, 1> buf_c(c.__storage(), c.size());
 
 			sycl::property_list props{ sycl::property::queue::enable_profiling() };
 
@@ -251,8 +251,8 @@ int main(int argc, char* argv[])
 
 			sycl::queue gpu_queue(sycl::cpu_selector{}, props); // попробовать на cpu_selector 
 
-			sycl::buffer<float, 1> buf_b(b.data(), b.size());
-			sycl::buffer<float, 1> buf_r(r.data(), r.size());
+			sycl::buffer<float, 1> buf_b(b.__storage(), b.size());
+			sycl::buffer<float, 1> buf_r(r.__storage(), r.size());
 
 			sycl::event event = gpu_queue.submit(
 				[&](sycl::handler& cgh) {

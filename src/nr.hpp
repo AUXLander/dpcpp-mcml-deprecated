@@ -61,17 +61,17 @@ struct PhotonStruct
 	void step_size_in_glass();
 	bool hit_boundary();
 	void roulette();
-	void record_r(double Refl, OutStruct& Out_Ptr);
-	void record_t(double Refl, OutStruct& Out_Ptr);
-	void drop(OutStruct& Out_Ptr);
+	void record_r(double Refl);
+	void record_t(double Refl);
+	void drop();
 
-	void cross_up_or_not(OutStruct& Out_Ptr);
-	void cross_down_or_not(OutStruct& Out_Ptr);
+	void cross_up_or_not();
+	void cross_down_or_not();
 
-	void cross_or_not(OutStruct& Out_Ptr);
+	void cross_or_not();
 
-	void hop_in_glass(OutStruct& Out_Ptr);
-	void hop_drop_spin(OutStruct& Out_Ptr);
+	void hop_in_glass();
+	void hop_drop_spin();
 
 	LayerStruct& get_current_layer()
 	{

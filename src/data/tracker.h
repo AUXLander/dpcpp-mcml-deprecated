@@ -237,11 +237,11 @@ public:
 		return INSTANCE;
 	}
 
-	void track(local_thread_storage&& data)
+	void track(local_thread_storage&& __storage)
 	{
 		std::unique_lock lock(__mutex);
 
-		__main_thread_storage.combine(std::move(data), local_thread_storage::combine_mode_e::COMBINE_ADD);
+		__main_thread_storage.combine(std::move(__storage), local_thread_storage::combine_mode_e::COMBINE_ADD);
 	}
 
 	void set_file(const char* filename)
