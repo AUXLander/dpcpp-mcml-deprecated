@@ -152,35 +152,22 @@ private:
 template<class T, template<typename...> class data_accessor>
 struct matrix
 {
+	using value_t = T;
 	using size_e = base_data_accessor::size_e;
 	using dimension_sizes_t = base_data_accessor::dimension_sizes_t;
 
-	using data_accessor_t = data_accessor<T>;
+	using data_accessor_t = data_accessor<value_t>;
 
-private:
+	const dimension_sizes_t& size;
+	data_accessor_t          data;
 
-	const dimension_sizes_t& __size;
-	data_accessor_t          __data;
+	matrix(const matrix<value_t, data_accessor>& other) = delete;
 
-	T& at(size_t i, size_t j)
-	{
-		return __data.get_value(i, j);
-	}
-
-	const T& at(size_t i, size_t j) const
-	{
-		return __data.get_value(i, j);
-	}
-
-public:
-
-	matrix(const matrix<T, data_accessor>& other) = delete;
-
-	matrix(matrix<T, data_accessor>&& other) = default;
+	matrix(matrix<value_t, data_accessor>&& other) = default;
 
 	matrix(size_t size_x, size_t size_y) :
-		__data(size_x, size_y),
-		__size(__data.size)
+		data(size_x, size_y),
+		size(data.size)
 	{;}
 
 	size_t size(size_t index) const
@@ -198,14 +185,14 @@ public:
 		return __size;
 	}
 
-	T& on(size_t x, size_t y)
+	value_t& on(size_t x, size_t y)
 	{
-		return __data.get_value(y, x);
+		return data.get_value(y, x);
 	}
 
-	const T& on(size_t x, size_t y) const
+	const value_t& on(size_t x, size_t y) const
 	{
-		return __data.get_value(y, x);
+		return data.get_value(y, x);
 	}
 
 	void print(std::ostream& fd, bool skip_zeros = true)
@@ -214,9 +201,9 @@ public:
 
 		fd << std::fixed << std::setprecision(3);
 
-		for (size_t i = 0; i < __size[size_e::y]; ++i)
+		for (size_t i = 0; i < size[size_e::y]; ++i)
 		{
-			for (size_t j = 0; j < __size[size_e::x]; ++j)
+			for (size_t j = 0; j < size[size_e::x]; ++j)
 			{
 				if (skip_zeros && std::abs(at(i, j)) < 1e-7)
 				{
@@ -233,7 +220,20 @@ public:
 
 		fd.setf(stored_flags);
 	}
+
+private:
+
+	value_t& at(size_t i, size_t j)
+	{
+		return data.get_value(i, j);
+	}
+
+	const value_t& at(size_t i, size_t j) const
+	{
+		return data.get_value(i, j);
+	}
 };
+
 
 /****
  *	Input parameters for each independent run.
@@ -284,6 +284,7 @@ struct InputStruct
 	}
 };
 
+
 /****
  *	Structures for scoring physical quantities.
  *	z and r represent z and r coordinates of the
@@ -294,7 +295,6 @@ struct InputStruct
  *	See manual for the physcial quantities.
  ****/
 
-
 struct ResultBlock
 {
 	using value_t = double;
@@ -304,7 +304,7 @@ struct ResultBlock
 	std::vector<value_t> r;
 	std::vector<value_t> a;
 
-	value_t value; // single size
+	value_t value;
 
 	ResultBlock(size_t rsz, size_t asz) :
 		matrix(rsz, asz),
@@ -355,7 +355,7 @@ public:
 	value_t&  Tt;
 
 	OutStruct(const InputStruct& cfg) : 
-		Rsp(0.0),
+		Rsp(Rspecular(cfg.layerspecs)),
 		/* Allocate the arrays and the matrices. */
 		Rd_rblock(cfg.nr, cfg.na), Rd_ra(Rd_rblock.matrix), Rd_r(Rd_rblock.r), Rd_a(Rd_rblock.a), Rd(Rd_rblock.value),
 		A_rblock(cfg.nr, cfg.nz, cfg.nz, cfg.num_layers + 2), A_rz(A_rblock.matrix), A_z(A_rblock.r), A_l(A_rblock.a), A(A_rblock.value),
@@ -376,8 +376,6 @@ public:
 		}
 	}
 
-	~OutStruct()
-	{;}
 };
 
 //\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\

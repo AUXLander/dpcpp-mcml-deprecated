@@ -138,13 +138,11 @@ void GetFnameFromArgv(int argc, const char* argv[], char* input_filename)
  ****/
 void DoOneRun(short NumRuns, InputStruct& input)
 {
-	OutStruct output(input);
-	PhotonStruct photon(input, output);
 	
 	long num_photons = input.num_photons;
 	long photon_rep = 10;
 
-	output.Rsp = Rspecular(input.layerspecs);
+	
 
 	long photon_idx = num_photons; // photon index
 
@@ -182,6 +180,8 @@ void DoOneRun(short NumRuns, InputStruct& input)
 		stream.write((const char*)&reserved, sizeof(reserved));
 	});
 
+	OutStruct output(input);
+	PhotonStruct photon(input, output);
 
 	for (; photon_idx > 0; --photon_idx)
 	{
