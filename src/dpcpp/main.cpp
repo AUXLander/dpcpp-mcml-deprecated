@@ -74,25 +74,30 @@ int main(int argc, char* argv[])
 	try
 	{
 		{
-			sycl::buffer<float, 1> buf_a(a.__storage(), a.size());
-			sycl::buffer<float, 1> buf_b(b.__storage(), b.size());
-			sycl::buffer<float, 1> buf_c(c.__storage(), c.size());
+			sycl::buffer<float, 1> buf_a(a.data(), a.size());
+			sycl::buffer<float, 1> buf_b(b.data(), b.size());
+			sycl::buffer<float, 1> buf_c(c.data(), c.size());
 
 			sycl::property_list props{ sycl::property::queue::enable_profiling() };
 
-			sycl::queue gpu_queue(sycl::gpu_selector{}, [](sycl::exception_list exceptions) {
-				for (auto& exception : exceptions)
+			sycl::queue gpu_queue(
+				sycl::gpu_selector{}, 
+				[](sycl::exception_list exceptions)
 				{
-					try
+					for (auto& exception : exceptions)
 					{
-						std::rethrow_exception(exception);
+						try
+						{
+							std::rethrow_exception(exception);
+						}
+						catch (sycl::exception& exception)
+						{
+							std::cerr << "Asynch error: " << exception.what() << std::endl;
+						}
 					}
-					catch (sycl::exception& exception)
-					{
-						std::cerr << "Asynch error: " << exception.what() << std::endl;
-					}
-				}
-				}, props); // props необязательный параметр, который нужен для профилирования
+				}, 
+				props
+			); // props необязательный параметр, который нужен для профилирования
 
 				// 4) sycl::program ????? не работает
 				// 
@@ -251,8 +256,8 @@ int main(int argc, char* argv[])
 
 			sycl::queue gpu_queue(sycl::cpu_selector{}, props); // попробовать на cpu_selector 
 
-			sycl::buffer<float, 1> buf_b(b.__storage(), b.size());
-			sycl::buffer<float, 1> buf_r(r.__storage(), r.size());
+			sycl::buffer<float, 1> buf_b(b.data(), b.size());
+			sycl::buffer<float, 1> buf_r(r.data(), r.size());
 
 			sycl::event event = gpu_queue.submit(
 				[&](sycl::handler& cgh) {

@@ -1,4 +1,5 @@
 #include "math.h"
+#include <CL/sycl.hpp>
 
 double SpinTheta(const double anisotropy)
 {

@@ -8,6 +8,8 @@
 #include <string.h>
 #include <ctype.h>
 
+#include <CL/sycl.hpp>
+
 #include "data/tracker.h"
 
 #include "io/io.hpp"
