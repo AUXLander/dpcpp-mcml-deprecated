@@ -714,8 +714,8 @@ void DoOneRun(short NumRuns, InputStruct& input)
 			props
 		);
 
-		constexpr size_t THREADS = 1U; // 16U;
-		constexpr size_t CORES = 1U; // 8U;
+		constexpr size_t GROUP_SIZE = 1U;// 16U;
+		constexpr size_t THREADS = 16U;
 
 		sycl::event event = queue.submit(
 			[&](sycl::handler& cgh) 
@@ -726,13 +726,16 @@ void DoOneRun(short NumRuns, InputStruct& input)
 
 				const auto layerspecs = l_buf.get_access<sycl::access::mode::read, sycl::access::target::constant_buffer>(cgh);
 
-				const auto photons_per_group = num_photons / (THREADS * CORES);
+				const auto photons_per_group = num_photons / (GROUP_SIZE * THREADS);
 
-				 cgh.parallel_for<class computing>(sycl::range<2>(CORES, THREADS),
+
+
+
+
+				cgh.parallel_for<class computing>(sycl::range<2>(THREADS, GROUP_SIZE),
 					[=](sycl::item<2> item)
 					{
 						const size_t linear_index = item.get_linear_id();
-
 						const size_t linear_shift = linear_index * photons_per_group;
 
 						PhotonStruct photon(input, layerspecs, output);
