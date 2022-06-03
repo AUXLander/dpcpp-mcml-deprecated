@@ -39,34 +39,3 @@ inline T setsign(T value, bool sign)
 
 	return value;
 }
-
-
-/***********************************************************
- *	Choose (sample) a new theta angle for photon propagation
- *	according to the anisotropy.
- *
- *	If anisotropy g is 0, then
- *		cos(theta) = 2*rand-1.
- *	otherwise
- *		sample according to the Henyey-Greenstein function.
- *
- *	Returns the cosine of the polar deflection angle theta.
- ****/
-
-double SpinTheta(const double anisotropy);
-
-/***********************************************************
- *	Compute the Fresnel reflectance.
- *
- *	Make sure that the cosine of the incident angle a1
- *	is positive, and the case when the angle is greater
- *	than the critical angle is ruled out.
- *
- * 	Avoid trigonometric function operations as much as
- *	possible, because they are computation-intensive.
- ****/
-double RFresnel(double n1,	/* incident refractive index.*/
-	double n2,	/* transmit refractive index.*/
-	double ca1,	/* cosine of the incident. angle. 0<a1<90 degrees*/
-	double* ca2_Ptr)  /* pointer to the cosine of the transmission angle. a2 > 0. */
-	;

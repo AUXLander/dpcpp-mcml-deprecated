@@ -691,13 +691,21 @@ void Sum2DA(InputStruct In_Parm, OutStruct& Out_Ptr)
 		}
 
 		Out_Ptr.A_z[iz] = sum;
+
+		if (sum > 0)
+		{
+			sum = sum;
+		}
 	}
 
 	sum = 0.0;
 	for (iz = 0; iz < nz; iz++) 
 	{
 		sum += Out_Ptr.A_z[iz];
-		Out_Ptr.A_l[IzToLayer(iz, In_Parm)] += Out_Ptr.A_z[iz];
+
+		const auto index = IzToLayer(iz, In_Parm);
+
+		Out_Ptr.A_l[index] += Out_Ptr.A_z[iz];
 	}
 
 	Out_Ptr.A = sum;

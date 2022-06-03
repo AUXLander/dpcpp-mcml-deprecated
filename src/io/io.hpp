@@ -134,30 +134,6 @@ struct raw_data_accessor : public base_data_accessor
 		const_cast<raw_data_accessor<value_t>*>(this)->get_value(i, j);
 	}
 
-	void unload_to(raw_data_accessor<value_t>& other)
-	{
-		const auto sz = std::accumulate(size.begin(), size.end(), 1.0, std::multiplies<size_t>{});
-
-		for (size_t i = 0; i < sz; ++i)
-		{
-			other.__storage[i] += __storage[i];
-
-			__storage[i] = 0;
-		}
-	}
-
-	void unload_to(sycl_device_accessor<value_t>& other)
-	{
-		const auto sz = std::accumulate(size.begin(), size.end(), 1.0, std::multiplies<size_t>{});
-
-		for (size_t i = 0; i < sz; ++i)
-		{
-			other.__universal_accessor[i] += __storage[i];
-
-			__storage[i] = 0;
-		}
-	}
-
 	pointer_t p_data()
 	{
 		// return __storage.get();
@@ -228,28 +204,6 @@ struct hash_data_accessor : public base_data_accessor
 		const_cast<hash_data_accessor<value_t>*>(this)->get_value(i, j);
 	}
 
-	void unload_to(hash_data_accessor<value_t>& other)
-	{
-		other.__storage.merge(__storage);
-
-		for (auto& [key, value] : __storage)
-		{
-			auto it = other.__storage.find(key);
-
-			assert(it != other.__storage.end());
-
-			it->second += value;
-		}
-	}
-
-	void unload_to(sycl_device_accessor<value_t>& other)
-	{
-		for (auto& [key, value] : __storage)
-		{
-			other.get_value(key[size_e::y], key[size_e::x]) += value;
-		}
-	}
-
 private:
 
 	std::unordered_map<key_t, value_t, hash_t> __storage;
@@ -276,11 +230,6 @@ struct matrix
 		data(size_x, size_y),
 		size(data.size)
 	{;}
-
-	void unload_to(matrix<value_t, data_accessor>& other)
-	{
-		data.unload_to(other.data);
-	}
 
 	size_t length() const
 	{
@@ -380,38 +329,40 @@ struct InputStruct
 	short na;					/* array range 0..na-1. */
 
 	short	num_layers;			/* number of layers. */
-	LayerStruct* layerspecs;	/* layer parameters. */
+	LayerStruct* layerspecs { nullptr };	/* layer parameters. */
 
 
 	InputStruct() = default;
 
 	InputStruct(const InputStruct&) = default;
 
-	//InputStruct(const InputStruct& o) :
-	//	num_photons(o.num_photons),
-	//	Wth(o.Wth),
-	//	dz(o.dz),
-	//	dr(o.dr),
-	//	da(o.da),
-	//	nz(o.nz),
-	//	nr(o.nr),
-	//	na(o.na),
-	//	num_layers(o.num_layers)//,
-	//	//layerspecs(nullptr)
-	//	//layerspecs( new LayerStruct[o.num_layers]() )
-	//{
-	//	//for (int i = 0; i < num_layers; ++i)
-	//	//{
-	//	//	new (layerspecs + i) LayerStruct(o.layerspecs[i]);
-	//	//}
-	//}
-
 	void free()
 	{
-		//if (layerspecs)
-		//{
-		//	::free(layerspecs);
-		//}
+		if (layerspecs)
+		{
+			::free(layerspecs);
+		}
+	}
+};
+
+template<class T, size_t dims>
+struct buffer
+{
+	std::unique_ptr<sycl::buffer<T, dims>> data;
+
+	template<typename ...Args>
+	buffer<T, dims>(Args && ...args) :
+		data{ new sycl::buffer<T, dims>(std::forward<Args>(args)...) }
+	{;}
+
+	void reset(sycl::buffer<T, dims>* pointer = nullptr)
+	{
+		data.reset(pointer);
+	}
+
+	operator sycl::buffer<T, dims>&()
+	{
+		return *data;
 	}
 };
 
@@ -420,30 +371,38 @@ struct ResultBlock
 	using value_t = double;
 
 	matrix<value_t, raw_data_accessor> matrix;
-	sycl::buffer<value_t, 2U>		   buf_m;
+	buffer<value_t, 2U>	 buf_m; //sycl::buffer<value_t, 2U>		   buf_m;
 
-	std::vector<value_t>	  r;
-	sycl::buffer<value_t, 1U> buf_r;
+	std::vector<value_t> r;
+	buffer<value_t, 1U>	 buf_r; //sycl::buffer<value_t, 1U> buf_r;
 
-	std::vector<value_t>      a;
-	sycl::buffer<value_t, 1U> buf_a;
+	std::vector<value_t> a;
+	buffer<value_t, 1U>  buf_a; // sycl::buffer<value_t, 1U> buf_a;
 
-	value_t                   value;
-	sycl::buffer<value_t, 1U> buf_v;
+	value_t              value;
+	buffer<value_t, 1U>  buf_v;// sycl::buffer<value_t, 1U> buf_v;
 
 	ResultBlock(size_t rsz, size_t asz) :
-		matrix(rsz, asz), buf_m(matrix.data.p_data(), sycl::range<2>(rsz, asz)),
-		r(rsz),			  buf_r(r.data(), rsz),
-		a(asz),			  buf_a(a.data(), asz),
+		matrix(rsz, asz), buf_m(matrix.data.p_data(), sycl::range<2>(asz, rsz)),
+		r(rsz),			  buf_r(r.data(), r.size()),
+		a(asz),			  buf_a(a.data(), a.size()),
 		value(0.0),		  buf_v(&value, 1)
 	{;}
 
 	ResultBlock(size_t rsz, size_t asz, size_t r_size, size_t a_size) :
-		matrix(rsz, asz), buf_m(matrix.data.p_data(), sycl::range<2>(rsz, asz)),
-		r(r_size),		  buf_r(r.data(), r_size),
-		a(a_size),		  buf_a(a.data(), a_size),
+		matrix(rsz, asz), buf_m(matrix.data.p_data(), sycl::range<2>(asz, rsz)),
+		r(r_size),		  buf_r(r.data(), r.size()),
+		a(a_size),		  buf_a(a.data(), a.size()),
 		value(0.0),		  buf_v(&value, 1)
 	{;}
+
+	void reset()
+	{
+		buf_m.reset();
+		buf_r.reset();
+		buf_a.reset();
+		buf_v.reset();
+	}
 };
 
 
@@ -513,6 +472,13 @@ public:
 			//nrerror("Wrong grid parameters.\n");
 		}
 	}
+
+	void reset()
+	{
+		Tt_rblock.reset();
+		A_rblock.reset();
+		Rd_rblock.reset();
+	}
 };
 
 //\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\
@@ -523,8 +489,10 @@ struct access_block
 	template<size_t dimensions>
 	using buffer_t = typename sycl::buffer<T, dimensions>;
 
+	constexpr static auto mode = sycl::access::mode::read_write;
+
 	template<size_t dimensions>
-	using rw_accessor = typename sycl::accessor<T, dimensions, sycl::access::mode::read_write>;
+	using rw_accessor = typename sycl::accessor<T, dimensions, mode>;
 
 	rw_accessor<2U> matrix;
 	rw_accessor<1U> r;
@@ -532,10 +500,10 @@ struct access_block
 	rw_accessor<1U> v;
 
 	access_block<T>(sycl::handler& cgh, buffer_t<2U>& buf_m, buffer_t<1U>& buf_r, buffer_t<1U>& buf_a, buffer_t<1U>& buf_v) :
-		matrix(buf_m. template get_access<sycl::access::mode::read_write>(cgh)),
-		r(buf_r.template get_access<sycl::access::mode::read_write>(cgh)), 
-		a(buf_a.template get_access<sycl::access::mode::read_write>(cgh)),
-		v(buf_v.template get_access<sycl::access::mode::read_write>(cgh))
+		matrix(buf_m.template get_access<mode>(cgh)),
+		r(buf_r.template get_access<mode>(cgh)),
+		a(buf_a.template get_access<mode>(cgh)),
+		v(buf_v.template get_access<mode>(cgh))
 	{;}
 
 	access_block<T>(const access_block<T>&) = default;
@@ -551,8 +519,8 @@ struct access_output
 	access_block<T> Tt;
 
 	access_output<T>(sycl::handler& cgh, OutStruct& out) :
-		Rsp(0.0),
-		
+		Rsp(out.Rsp),
+
 		A (cgh, out.A_rblock.buf_m,  out.A_rblock.buf_r,  out.A_rblock.buf_a,  out.A_rblock.buf_v),
 		Rd(cgh, out.Rd_rblock.buf_m, out.Rd_rblock.buf_r, out.Rd_rblock.buf_a, out.Rd_rblock.buf_v),
 		Tt(cgh, out.Tt_rblock.buf_m, out.Tt_rblock.buf_r, out.Tt_rblock.buf_a, out.Tt_rblock.buf_v)
