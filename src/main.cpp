@@ -18,6 +18,9 @@
 
 #include <oneapi/dpl/random>
 
+#include <CL/sycl/detail/cl.h>
+#include <CL/sycl/detail/pi.h>
+
 double RFresnel(double n1, double n2, double ca1, double& ca2_Ptr)
 {
 	double r;
@@ -70,8 +73,13 @@ double RFresnel(double n1, double n2, double ca1, double& ca2_Ptr)
 	return r;
 }
 
+template<sycl::access::mode MODE, sycl::access::target TARGET>
 struct PhotonStruct
 {
+	using constant_accessor_t = sycl::accessor<LayerStruct, 1U, sycl::access::mode::read, sycl::access::target::constant_buffer>;
+
+	using output_accessor_t = access_output<double, TARGET>;
+
 	double x{ 0 }, y{ 0 }, z{ 0 };
 	double ux{ 0 }, uy{ 0 }, uz{ 0 };
 	double w{ 0 };
@@ -88,82 +96,390 @@ struct PhotonStruct
 
 	const InputStruct& input;
 
-	const sycl::accessor<LayerStruct, 1U, sycl::access::mode::read, sycl::access::target::constant_buffer> layerspecs;
+	const constant_accessor_t& layerspecs;
 
-	const access_output<double>& output;
+	const output_accessor_t& output;
 
-	PhotonStruct(const InputStruct& input, const sycl::accessor<LayerStruct, 1U, sycl::access::mode::read, sycl::access::target::constant_buffer> l, const access_output<double>& output) :
-		engine{ 100, 0 }, distr{ 0.0, 1.0 }, input{ input }, layerspecs(l), output{ output }
+	PhotonStruct<MODE, TARGET>(const InputStruct& input, const constant_accessor_t& l, const output_accessor_t& output) :
+		engine{ 100, 0 }, distr{ 0.0, 1.0 }, input{ input }, layerspecs{ l }, output{ output }
 	{;}
 
-	~PhotonStruct() = default;
+	~PhotonStruct<MODE, TARGET>() = default;
 
-	void init(const double Rspecular);
-
-	void spin(const double anisotropy);
-
-	void hop();
-
-	void step_size_in_glass();
-	bool hit_boundary();
-	void roulette();
-	void record_r(double Refl);
-	void record_t(double Refl);
-	void drop();
-
-	void cross_up_or_not();
-	void cross_down_or_not();
-
-	void cross_or_not();
-
-	double SpinTheta(const double);
-
-	void hop_in_glass();
-	void hop_drop_spin();
-
-	const LayerStruct& get_current_layer() const
+	void init(const double Rspecular)
 	{
-		//assert(input.layerspecs);
+		w = 1.0 - Rspecular;
+		dead = 0;
+		layer = 1; // LAYER CHANGE
+		step_size = 0;
+		sleft = 0;
 
-		//return input.layerspecs[layer];
+		x = 0.0; // COORD CHANGE
+		y = 0.0;
+		z = 0.0;
 
+		ux = 0.0;
+		uy = 0.0;
+		uz = 1.0;
+
+		if ((layerspecs[1].mua == 0.0) && (layerspecs[1].mus == 0.0))
+		{
+			layer = 2; // LAYER CHANGE
+			z = layerspecs[2].z0;
+		}
+
+		// track.track(x, y, z, layer);
+	}
+
+	void spin(const double anisotropy)
+	{
+		const double ux = this->ux;
+		const double uy = this->uy;
+		const double uz = this->uz;
+
+		const double cost = SpinTheta(anisotropy);
+		const double sint = std::sqrt(1.0 - cost * cost);
+
+		const double psi = 2.0 * PI * get_random();
+
+		const double cosp = std::cos(psi);
+		const double sinp = setsign<double, uint64_t>(std::sqrt(1.0 - cosp * cosp), psi < PI);
+
+		if (fabs(uz) > COSZERO)
+		{
+			this->ux = sint * cosp;
+			this->uy = sint * sinp;
+			this->uz = cost * sgn(uz);
+		}
+		else
+		{
+			const double temp = std::sqrt(1.0 - uz * uz);
+
+			this->ux = sint * (ux * uz * cosp - uy * sinp) / temp + ux * cost;
+			this->uy = sint * (uy * uz * cosp + ux * sinp) / temp + uy * cost;
+			this->uz = -sint * cosp * temp + uz * cost;
+		}
+	}
+
+
+	void hop()
+	{
+		// COORD CHANGE
+
+		x += step_size * ux;
+		y += step_size * uy;
+		z += step_size * uz;
+
+		// track.track(x, y, z, layer);
+	}
+
+	void step_size_in_glass()
+	{
+		const auto& olayer = get_current_layer();
+
+		if (uz > 0.0)
+		{
+			step_size = (olayer.z1 - z) / uz;
+		}
+		else if (uz < 0.0)
+		{
+			step_size = (olayer.z0 - z) / uz;
+		}
+		else
+		{
+			step_size = 0.0;
+		}
+	}
+
+	bool hit_boundary()
+	{
+		const auto& olayer = get_current_layer();
+
+		double dl_b;
+
+		if (uz > 0.0)
+		{
+			dl_b = (olayer.z1 - z) / uz;
+		}
+		else if (uz < 0.0)
+		{
+			dl_b = (olayer.z0 - z) / uz;
+		}
+
+		const bool hit = (uz != 0.0 && step_size > dl_b);
+
+		if (hit)
+		{
+			sleft = (step_size - dl_b) * (olayer.mua + olayer.mus);
+			step_size = dl_b;
+		}
+
+		return hit;
+	}
+
+	void roulette()
+	{
+		if (w != 0.0 && get_random() < CHANCE)
+		{
+			w /= CHANCE;
+		}
+		else
+		{
+			dead = true;
+		}
+	}
+
+	void record_r(double reflectance)
+	{
+		size_t ir, ia;
+
+		ir = static_cast<size_t>(std::sqrt(x * x + y * y) / input.dr);
+		ir = std::min<size_t>(ir, input.nr - 1);
+
+		ia = static_cast<size_t>(std::acos(-uz) / input.da);
+		ia = std::min<size_t>(ia, input.na - 1);
+
+		output.Rd.matrix[ir][ia] += w * (1.0 - reflectance);
+
+		w *= reflectance;
+	}
+
+	void record_t(double reflectance)
+	{
+		size_t ir, ia;
+
+		ir = static_cast<size_t>(std::sqrt(x * x + y * y) / input.dr);
+		ir = std::min<size_t>(ir, input.nr - 1);
+
+		ia = static_cast<size_t>(std::acos(uz) / input.da);
+		ia = std::min<size_t>(ia, input.na - 1);
+
+		output.Tt.matrix[ia][ir] += w * (1.0 - reflectance);
+
+		w *= reflectance;
+	}
+
+	void drop()
+	{
+		double dwa;
+		size_t iz, ir;
+		double mua, mus;
+
+		iz = static_cast<size_t>(z / input.dz);
+		iz = std::min<size_t>(iz, input.nz - 1);
+
+		ir = static_cast<size_t>(std::sqrt(x * x + y * y) / input.dr);
+		ir = std::min<size_t>(ir, input.nr - 1);
+
+		const auto& olayer = get_current_layer();
+
+		mua = olayer.mua;
+		mus = olayer.mus;
+
+		dwa = w * mua / (mua + mus);
+
+		w -= dwa;
+
+		output.A.matrix[iz][ir] += dwa;
+	}
+
+	void cross_up_or_not()
+	{
+		double uz1 = 0.0;
+		double r = 0.0;
+		double ni = layerspecs[layer].n;
+		double nt = layerspecs[layer - 1].n;
+
+		if (-uz <= layerspecs[layer].cos_crit0)
+		{
+			r = 1.0;
+		}
+		else
+		{
+			r = RFresnel(ni, nt, -uz, uz1);
+		}
+
+		if (get_random() > r)
+		{
+			if (layer == 1)
+			{
+				uz = -uz1;
+				record_r(0.0);
+				dead = true;
+			}
+			else
+			{
+				layer--; // LAYER CHANGE
+
+				ux *= ni / nt;
+				uy *= ni / nt;
+				uz = -uz1;
+
+				// track.track(x, y, z, layer);
+			}
+		}
+		else
+		{
+			uz = -uz;
+		}
+	}
+
+	void cross_down_or_not()
+	{
+		double uz1 = 0.0;
+		double r = 0.0;
+		double ni = layerspecs[layer].n;
+		double nt = layerspecs[layer + 1].n;
+
+		if (uz <= layerspecs[layer].cos_crit1)
+		{
+			r = 1.0;
+		}
+		else
+		{
+			r = RFresnel(ni, nt, uz, uz1);
+		}
+
+		if (get_random() > r)
+		{
+			if (layer == input.num_layers)
+			{
+				uz = uz1;
+				record_t(0.0);
+				dead = true;
+			}
+			else
+			{
+				layer++; // LAYER CHANGE
+
+				ux *= ni / nt;
+				uy *= ni / nt;
+				uz = uz1;
+
+				// track.track(x, y, z, layer);
+			}
+		}
+		else
+		{
+			uz = -uz;
+		}
+	}
+
+	void cross_or_not()
+	{
+		if (uz < 0.0)
+		{
+			cross_up_or_not();
+		}
+		else
+		{
+			cross_down_or_not();
+		}
+	}
+
+	double SpinTheta(const double anisotropy)
+	{
+		double cost;
+
+		if (anisotropy == 0.0)
+		{
+			cost = 2.0 * get_random() - 1.0;
+		}
+		else
+		{
+			const double temp = (1.0 - anisotropy * anisotropy) / (1.0 - anisotropy + 2.0 * anisotropy * get_random());
+
+			cost = (1 + anisotropy * anisotropy - temp * temp) / (2.0 * anisotropy);
+
+			if (cost < -1.0)
+			{
+				cost = -1.0;
+			}
+			else if (cost > 1.0)
+			{
+				cost = 1;
+			}
+		}
+
+		return cost;
+	}
+
+	void hop_in_glass()
+	{
+		if (uz == 0.0)
+		{
+			dead = true;
+		}
+		else
+		{
+			step_size_in_glass();
+			hop();
+			cross_or_not();
+		}
+	}
+
+	void hop_drop_spin()
+	{
+		const auto& olayer = get_current_layer();
+
+		if (olayer.is_glass())
+		{
+			hop_in_glass();
+		}
+		else
+		{
+			const double mua = olayer.mua;
+			const double mus = olayer.mus;
+
+			if (sleft == 0.0)
+			{
+				double rnd;
+
+				do
+				{
+					rnd = get_random();
+				}
+				while (rnd <= 0.0);
+
+				step_size = -std::log(rnd) / (mua + mus);
+			}
+			else
+			{
+				step_size = sleft / (mua + mus);
+				sleft = 0.0;
+			}
+
+			const auto hit = hit_boundary();
+
+			hop();
+
+			if (hit)
+			{
+				cross_or_not();
+			}
+			else
+			{
+				drop();
+				spin(olayer.anisotropy);
+			}
+		}
+
+		if (w < input.Wth && !dead)
+		{
+			roulette();
+		}
+	}
+
+	inline const LayerStruct& get_current_layer() const
+	{
 		return layerspecs[layer];
 	}
 
-	double get_random()
+	inline double get_random()
 	{
-		const auto random = distr(engine);
-
-		return random;
+		return distr(engine);
 	}
 };
-
-double PhotonStruct::SpinTheta(const double anisotropy)
-{
-	double cost;
-
-	if (anisotropy == 0.0)
-	{
-		cost = 2.0 * get_random() - 1.0;
-	}
-	else
-	{
-		const double temp = (1.0 - anisotropy * anisotropy) / (1.0 - anisotropy + 2.0 * anisotropy * get_random());
-
-		cost = (1 + anisotropy * anisotropy - temp * temp) / (2.0 * anisotropy);
-
-		if (cost < -1.0)
-		{
-			cost = -1.0;
-		}
-		else if (cost > 1.0)
-		{
-			cost = 1;
-		}
-	}
-
-	return cost;
-}
 
 double Rspecular(LayerStruct* Layerspecs_Ptr)
 {
@@ -186,346 +502,6 @@ double Rspecular(LayerStruct* Layerspecs_Ptr)
 	return r1;
 }
 
-/***********************************************************
- *	Initialize a photon packet.
- ****/
-void PhotonStruct::init(const double Rspecular)
-{
-	w = 1.0 - Rspecular;
-	dead = 0;
-	layer = 1; // LAYER CHANGE
-	step_size = 0;
-	sleft = 0;
-
-	x = 0.0; // COORD CHANGE
-	y = 0.0;
-	z = 0.0;
-
-	ux = 0.0;
-	uy = 0.0;
-	uz = 1.0;
-
-	if ((layerspecs[1].mua == 0.0) && (layerspecs[1].mus == 0.0))
-	{
-		layer = 2; // LAYER CHANGE
-		z = layerspecs[2].z0;
-	}
-
-	// track.track(x, y, z, layer);
-}
-
-void PhotonStruct::spin(const double anisotropy)
-{
-	const double ux = this->ux;
-	const double uy = this->uy;
-	const double uz = this->uz;
-
-	const double cost = SpinTheta(anisotropy);
-	const double sint = std::sqrt(1.0 - cost * cost);
-
-	const double psi = 2.0 * PI * get_random();
-
-	const double cosp = std::cos(psi);
-	const double sinp = setsign<double, uint64_t>(std::sqrt(1.0 - cosp * cosp), psi < PI);
-
-	if (fabs(uz) > COSZERO)
-	{
-		this->ux = sint * cosp;
-		this->uy = sint * sinp;
-		this->uz = cost * sgn(uz);
-	}
-	else
-	{
-		const double temp = std::sqrt(1.0 - uz * uz);
-
-		this->ux = sint * (ux * uz * cosp - uy * sinp) / temp + ux * cost;
-		this->uy = sint * (uy * uz * cosp + ux * sinp) / temp + uy * cost;
-		this->uz = -sint * cosp * temp + uz * cost;
-	}
-}
-
-void PhotonStruct::hop()
-{
-	// COORD CHANGE
-
-	x += step_size * ux;
-	y += step_size * uy;
-	z += step_size * uz;
-
-	// track.track(x, y, z, layer);
-}
-
-void PhotonStruct::step_size_in_glass()
-{
-	const auto& olayer = get_current_layer();
-
-	if (uz > 0.0)
-	{
-		step_size = (olayer.z1 - z) / uz;
-	}
-	else if (uz < 0.0)
-	{
-		step_size = (olayer.z0 - z) / uz;
-	}
-	else
-	{
-		step_size = 0.0;
-	}
-}
-
-bool PhotonStruct::hit_boundary()
-{
-	const auto& olayer = get_current_layer();
-
-	double dl_b;
-
-	if (uz > 0.0)
-	{
-		dl_b = (olayer.z1 - z) / uz;
-	}
-	else if (uz < 0.0)
-	{
-		dl_b = (olayer.z0 - z) / uz;
-	}
-
-	const bool hit = (uz != 0.0 && step_size > dl_b);
-
-	if (hit)
-	{
-		sleft = (step_size - dl_b) * (olayer.mua + olayer.mus);
-		step_size = dl_b;
-	}
-
-	return hit;
-}
-
-void PhotonStruct::roulette()
-{
-	if (w != 0.0 && get_random() < CHANCE)
-	{
-		w /= CHANCE;
-	}
-	else
-	{
-		dead = true;
-	}
-}
-
-void PhotonStruct::drop()
-{
-	double dwa;
-	size_t iz, ir;
-	double mua, mus;
-
-	iz = static_cast<size_t>(z / input.dz);
-	iz = std::min<size_t>(iz, input.nz - 1);
-
-	ir = static_cast<size_t>(std::sqrt(x * x + y * y) / input.dr);
-	ir = std::min<size_t>(ir, input.nr - 1);
-
-	const auto& olayer = get_current_layer();
-
-	mua = olayer.mua;
-	mus = olayer.mus;
-
-	dwa = w * mua / (mua + mus);
-
-	w -= dwa;
-
-	output.A.matrix[iz][ir] += dwa;
-}
-
-
-void PhotonStruct::record_t(double reflectance)
-{
-	size_t ir, ia;
-
-	ir = static_cast<size_t>(std::sqrt(x * x + y * y) / input.dr);
-	ir = std::min<size_t>(ir, input.nr - 1);
-
-	ia = static_cast<size_t>(std::acos(uz) / input.da);
-	ia = std::min<size_t>(ia, input.na - 1);
-
-	output.Tt.matrix[ia][ir] += w * (1.0 - reflectance);
-
-	w *= reflectance;
-}
-
-void PhotonStruct::record_r(double reflectance)
-{
-	size_t ir, ia;
-
-	ir = static_cast<size_t>(std::sqrt(x * x + y * y) / input.dr);
-	ir = std::min<size_t>(ir, input.nr - 1);
-
-	ia = static_cast<size_t>(std::acos(-uz) / input.da);
-	ia = std::min<size_t>(ia, input.na - 1);
-
-	output.Rd.matrix[ir][ia] += w * (1.0 - reflectance);
-	
-	w *= reflectance;
-}
-
-void PhotonStruct::cross_up_or_not()
-{
-	double uz1 = 0.0;
-	double r = 0.0;
-	double ni = layerspecs[layer].n;
-	double nt = layerspecs[layer - 1].n;
-
-	if (-uz <= layerspecs[layer].cos_crit0)
-	{
-		r = 1.0;
-	}
-	else
-	{
-		r = RFresnel(ni, nt, -uz, uz1);
-	}
-
-	if (get_random() > r)
-	{
-		if (layer == 1)
-		{
-			uz = -uz1;
-			record_r(0.0);
-			dead = true;
-		}
-		else
-		{
-			layer--; // LAYER CHANGE
-
-			ux *= ni / nt;
-			uy *= ni / nt;
-			uz = -uz1;
-
-			// track.track(x, y, z, layer);
-		}
-	}
-	else
-	{
-		uz = -uz;
-	}
-}
-
-void PhotonStruct::cross_down_or_not()
-{
-	double uz1 = 0.0;
-	double r = 0.0;
-	double ni = layerspecs[layer].n;
-	double nt = layerspecs[layer + 1].n;
-
-	if (uz <= layerspecs[layer].cos_crit1)
-	{
-		r = 1.0;
-	}
-	else
-	{
-		r = RFresnel(ni, nt, uz, uz1);
-	}
-
-	if (get_random() > r)
-	{
-		if (layer == input.num_layers)
-		{
-			uz = uz1;
-			record_t(0.0);
-			dead = true;
-		}
-		else
-		{
-			layer++; // LAYER CHANGE
-
-			ux *= ni / nt;
-			uy *= ni / nt;
-			uz = uz1;
-
-			// track.track(x, y, z, layer);
-		}
-	}
-	else
-	{
-		uz = -uz;
-	}
-}
-
-void PhotonStruct::cross_or_not()
-{
-	if (uz < 0.0)
-	{
-		cross_up_or_not();
-	}
-	else
-	{
-		cross_down_or_not();
-	}
-}
-
-void PhotonStruct::hop_in_glass()
-{
-	if (uz == 0.0)
-	{
-		dead = true;
-	}
-	else
-	{
-		step_size_in_glass();
-		hop();
-		cross_or_not();
-	}
-}
-
-void PhotonStruct::hop_drop_spin()
-{
-	const auto& olayer = get_current_layer();
-
-	if (olayer.is_glass())
-	{
-		hop_in_glass();
-	}
-	else
-	{
-		const double mua = olayer.mua;
-		const double mus = olayer.mus;
-
-		if (sleft == 0.0)
-		{
-			double rnd;
-
-			do
-			{
-				rnd = get_random();
-			}
-			while (rnd <= 0.0);
-
-			step_size = -std::log(rnd) / (mua + mus);
-		}
-		else
-		{
-			step_size = sleft / (mua + mus);
-			sleft = 0.0;
-		}
-
-		const auto hit = hit_boundary();
-
-		hop();
-
-		if (hit)
-		{
-			cross_or_not();
-		}
-		else
-		{
-			drop();
-			spin(olayer.anisotropy);
-		}
-	}
-
-	if (w < input.Wth && !dead)
-	{
-		roulette();
-	}
-}
-
 /*	Declare before they are used in main(). */
 FILE* GetFile(char*);
 short ReadNumRuns(FILE*);
@@ -534,7 +510,8 @@ void CheckParm(FILE*, InputStruct*);
 void InitOutputData(InputStruct, OutStruct*);
 void FreeData(InputStruct, OutStruct*);
 //double Rspecular(LayerStruct*);
-void hop_drop_spin(InputStruct*, PhotonStruct*, OutStruct&);
+
+//void hop_drop_spin(InputStruct*, PhotonStruct<sycl::access::mode MODE, sycl::access::target TARGET>*, OutStruct&);
 void SumScaleResult(InputStruct, OutStruct&);
 void WriteResult(InputStruct, const OutStruct&, char*);
 
@@ -715,10 +692,11 @@ void DoOneRun(short NumRuns, InputStruct& input)
 		);
 
 		constexpr size_t GROUP_SIZE = 1U;// 16U;
-		constexpr size_t THREADS = 16U;
+		constexpr size_t THREADS = 128U;
 
-		sycl::event event = queue.submit(
-			[&](sycl::handler& cgh) 
+		try
+		{
+			const auto kernel = [&](sycl::handler& cgh) 
 			{
 				sycl::stream cout(1024, 80, cgh);
 
@@ -728,22 +706,15 @@ void DoOneRun(short NumRuns, InputStruct& input)
 
 				const auto photons_per_group = num_photons / (GROUP_SIZE * THREADS);
 
+				// access_output<double, sycl::access::target::local> loutput(cgh, global_output, false);
 
-
-
-
-				cgh.parallel_for<class computing>(sycl::range<2>(THREADS, GROUP_SIZE),
-					[=](sycl::item<2> item)
+				cgh.parallel_for(sycl::nd_range<1>(sycl::range<1>(THREADS), sycl::range<1>(GROUP_SIZE)),
+					[=](sycl::nd_item<1> item)
 					{
-						const size_t linear_index = item.get_linear_id();
-						const size_t linear_shift = linear_index * photons_per_group;
-
-						PhotonStruct photon(input, layerspecs, output);
+						PhotonStruct<sycl::access::mode::read_write, sycl::access::target::global_buffer> photon(input, layerspecs, output);
 
 						for (size_t local_index = 0; local_index < photons_per_group; ++local_index)
 						{
-							const auto photon_idx = linear_shift + local_index;
-
 							photon.init(output.Rsp);
 
 							do
@@ -753,18 +724,51 @@ void DoOneRun(short NumRuns, InputStruct& input)
 							while (!photon.dead);
 						}
 
-						cout << "linear: " << sycl::setw(3) << sycl::fixed << linear_index << sycl::endl;
+						// все потоки дожидаются
+						// item.barrier(sycl::access::fence_space::local_space);
 					}
-				 );
+				);
+			};
+
+			{
+				sycl::event event = queue.submit(kernel);
+
+				uint64_t start = event.get_profiling_info<sycl::info::event_profiling::command_start>();
+				uint64_t end = event.get_profiling_info<sycl::info::event_profiling::command_end>();
+
+				std::cout << "Kernel execution time: " << (end - start) << " ns" << std::endl;
 			}
-		);
 
-		queue.wait_and_throw();
+			queue.wait_and_throw();
 
-		uint64_t start = event.get_profiling_info<sycl::info::event_profiling::command_start>();
-		uint64_t end = event.get_profiling_info<sycl::info::event_profiling::command_end>();
+			//return;
 
-		std::cout << "Kernel execution time: " << (end - start) << " ns" << std::endl;
+			//{
+			//	sycl::event event = queue.submit(kernel);
+
+			//	uint64_t start = event.get_profiling_info<sycl::info::event_profiling::command_start>();
+			//	uint64_t end = event.get_profiling_info<sycl::info::event_profiling::command_end>();
+
+			//	std::cout << "Kernel execution time: " << (end - start) << " ns" << std::endl;
+			//}
+
+			//queue.wait_and_throw();
+
+			//{
+			//	sycl::event event = queue.submit(kernel);
+
+			//	uint64_t start = event.get_profiling_info<sycl::info::event_profiling::command_start>();
+			//	uint64_t end = event.get_profiling_info<sycl::info::event_profiling::command_end>();
+
+			//	std::cout << "Kernel execution time: " << (end - start) << " ns" << std::endl;
+			//}
+
+			//queue.wait_and_throw();
+		}
+		catch (sycl::exception& exception)
+		{
+			std::cerr << "Kernel error: " << exception.what() << std::endl;
+		}
 
 		// g.write();
 

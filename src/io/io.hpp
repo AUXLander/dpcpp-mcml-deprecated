@@ -364,6 +364,11 @@ struct buffer
 	{
 		return *data;
 	}
+
+	sycl::range<dims> get_range() const
+	{
+		return data->get_range();
+	}
 };
 
 struct ResultBlock
@@ -483,7 +488,7 @@ public:
 
 //\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\
 
-template<typename T>
+template<typename T, sycl::access::target TARGET = sycl::access::target::global_buffer>
 struct access_block
 {
 	template<size_t dimensions>
@@ -492,38 +497,56 @@ struct access_block
 	constexpr static auto mode = sycl::access::mode::read_write;
 
 	template<size_t dimensions>
-	using rw_accessor = typename sycl::accessor<T, dimensions, mode>;
+	using rw_accessor = typename sycl::accessor<T, dimensions, mode, TARGET>;
 
 	rw_accessor<2U> matrix;
 	rw_accessor<1U> r;
 	rw_accessor<1U> a;
 	rw_accessor<1U> v;
 
-	access_block<T>(sycl::handler& cgh, buffer_t<2U>& buf_m, buffer_t<1U>& buf_r, buffer_t<1U>& buf_a, buffer_t<1U>& buf_v) :
+	access_block<T, TARGET>(sycl::handler& cgh, buffer_t<2U>& buf_m, buffer_t<1U>& buf_r, buffer_t<1U>& buf_a, buffer_t<1U>& buf_v) :
 		matrix(buf_m.template get_access<mode>(cgh)),
 		r(buf_r.template get_access<mode>(cgh)),
 		a(buf_a.template get_access<mode>(cgh)),
 		v(buf_v.template get_access<mode>(cgh))
 	{;}
 
-	access_block<T>(const access_block<T>&) = default;
+	access_block<T, TARGET>(sycl::handler& cgh, const sycl::range<2>& range_m, const sycl::range<1>& range_r, const sycl::range<1>& range_a, const sycl::range<1>& range_v) :
+		matrix(range_m, cgh),
+		r(range_r, cgh),
+		a(range_a, cgh),
+		v(range_v, cgh)
+	{;}
+
+	// access_block<T, TARGET>(access_block<T, TARGET>&&) = default;
+
+	access_block<T, TARGET>(const access_block<T, TARGET>&) = default;
 };
 
-template<typename T>
+template<typename T, sycl::access::target TARGET = sycl::access::target::global_buffer>
 struct access_output
 {
 	T Rsp;
 
-	access_block<T> A;
-	access_block<T> Rd;
-	access_block<T> Tt;
+	access_block<T, TARGET> A;
+	access_block<T, TARGET> Rd;
+	access_block<T, TARGET> Tt;
 
-	access_output<T>(sycl::handler& cgh, OutStruct& out) :
+	access_output<T, TARGET>(sycl::handler& cgh, OutStruct& out) :
 		Rsp(out.Rsp),
 
 		A (cgh, out.A_rblock.buf_m,  out.A_rblock.buf_r,  out.A_rblock.buf_a,  out.A_rblock.buf_v),
 		Rd(cgh, out.Rd_rblock.buf_m, out.Rd_rblock.buf_r, out.Rd_rblock.buf_a, out.Rd_rblock.buf_v),
 		Tt(cgh, out.Tt_rblock.buf_m, out.Tt_rblock.buf_r, out.Tt_rblock.buf_a, out.Tt_rblock.buf_v)
+
+	{;}
+
+	access_output<T, TARGET>(sycl::handler& cgh, OutStruct& out, bool) :
+		Rsp(out.Rsp),
+
+		A (cgh, out.A_rblock.buf_m.get_range(), out.A_rblock.buf_r.get_range(), out.A_rblock.buf_a.get_range(), out.A_rblock.buf_v.get_range()),
+		Rd(cgh, out.Rd_rblock.buf_m.get_range(), out.Rd_rblock.buf_r.get_range(), out.Rd_rblock.buf_a.get_range(), out.Rd_rblock.buf_v.get_range()),
+		Tt(cgh, out.Tt_rblock.buf_m.get_range(), out.Tt_rblock.buf_r.get_range(), out.Tt_rblock.buf_a.get_range(), out.Tt_rblock.buf_v.get_range())
 
 	{;}
 };
