@@ -376,7 +376,7 @@ struct ResultBlock
 	using value_t = double;
 
 	matrix<value_t, raw_data_accessor> matrix;
-	buffer<value_t, 2U>	 buf_m; //sycl::buffer<value_t, 2U>		   buf_m;
+	buffer<value_t, 2U>	 buf_m;
 
 	std::vector<value_t> r;
 	buffer<value_t, 1U>	 buf_r; //sycl::buffer<value_t, 1U> buf_r;

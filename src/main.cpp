@@ -673,7 +673,7 @@ void DoOneRun(short NumRuns, InputStruct& input)
 
 		sycl::property_list props{ sycl::property::queue::enable_profiling() };
 
-		sycl::queue queue(sycl::cpu_selector{}, 
+		sycl::queue queue(sycl::gpu_selector{}, 
 			[](sycl::exception_list exceptions)
 			{
 				for (auto& exception : exceptions)
@@ -691,27 +691,38 @@ void DoOneRun(short NumRuns, InputStruct& input)
 			props
 		);
 
-		constexpr size_t GROUP_SIZE = 1U;// 16U;
-		constexpr size_t THREADS = 128U;
+		constexpr size_t work_item_size  = 1U;
+		constexpr size_t work_group_size = 2048; // 512U;
 
 		try
 		{
+			constexpr auto read = sycl::access::mode::read;
+			constexpr auto read_write = sycl::access::mode::read_write;
+
+			constexpr auto target_global = sycl::access::target::global_buffer;
+			constexpr auto target_local = sycl::access::target::local;
+			constexpr auto target_constant = sycl::access::target::constant_buffer;
+
+
 			const auto kernel = [&](sycl::handler& cgh) 
 			{
 				sycl::stream cout(1024, 80, cgh);
 
 				access_output<double> output(cgh, global_output);
 
-				const auto layerspecs = l_buf.get_access<sycl::access::mode::read, sycl::access::target::constant_buffer>(cgh);
+				const auto layerspecs = l_buf.get_access<read, target_constant>(cgh);
 
-				const auto photons_per_group = num_photons / (GROUP_SIZE * THREADS);
+				const auto photons_per_group = num_photons / (work_item_size * work_group_size);
 
-				// access_output<double, sycl::access::target::local> loutput(cgh, global_output, false);
+				// access_output<double, target_local> loutput(cgh, global_output, false);
 
-				cgh.parallel_for(sycl::nd_range<1>(sycl::range<1>(THREADS), sycl::range<1>(GROUP_SIZE)),
+				auto global_range = sycl::range<1>(work_group_size);
+				auto local_range  = sycl::range<1>(work_item_size);
+
+				cgh.parallel_for(sycl::nd_range<1>(global_range, local_range),
 					[=](sycl::nd_item<1> item)
 					{
-						PhotonStruct<sycl::access::mode::read_write, sycl::access::target::global_buffer> photon(input, layerspecs, output);
+						PhotonStruct<read_write, target_global> photon(input, layerspecs, output);
 
 						for (size_t local_index = 0; local_index < photons_per_group; ++local_index)
 						{
@@ -736,39 +747,17 @@ void DoOneRun(short NumRuns, InputStruct& input)
 				uint64_t start = event.get_profiling_info<sycl::info::event_profiling::command_start>();
 				uint64_t end = event.get_profiling_info<sycl::info::event_profiling::command_end>();
 
-				std::cout << "Kernel execution time: " << (end - start) << " ns" << std::endl;
+				std::cout << "Kernel execution time: " << (double)(end - start) * 1e-6 << " ms" << std::endl;
 			}
 
 			queue.wait_and_throw();
-
-			//return;
-
-			//{
-			//	sycl::event event = queue.submit(kernel);
-
-			//	uint64_t start = event.get_profiling_info<sycl::info::event_profiling::command_start>();
-			//	uint64_t end = event.get_profiling_info<sycl::info::event_profiling::command_end>();
-
-			//	std::cout << "Kernel execution time: " << (end - start) << " ns" << std::endl;
-			//}
-
-			//queue.wait_and_throw();
-
-			//{
-			//	sycl::event event = queue.submit(kernel);
-
-			//	uint64_t start = event.get_profiling_info<sycl::info::event_profiling::command_start>();
-			//	uint64_t end = event.get_profiling_info<sycl::info::event_profiling::command_end>();
-
-			//	std::cout << "Kernel execution time: " << (end - start) << " ns" << std::endl;
-			//}
-
-			//queue.wait_and_throw();
 		}
 		catch (sycl::exception& exception)
 		{
 			std::cerr << "Kernel error: " << exception.what() << std::endl;
 		}
+
+
 
 		// g.write();
 

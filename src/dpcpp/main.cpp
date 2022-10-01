@@ -66,6 +66,73 @@ constexpr size_t N = 1024;
 constexpr size_t GROUP_SIZE = 8; // почему большее количество не создаетс€?? 
 constexpr size_t GROUP_COUNT = (N / GROUP_SIZE);
 
+
+int main_()
+{
+	constexpr size_t N = 1024;
+
+	sycl::queue gpu_queue{ sycl::gpu_selector{} };
+
+	// выделение пам€ти происходит на куче
+	std::vector<float> a(N, 1.0f), b(N, 2.0f), c(N, 0.0f);
+
+	// local scope 
+	{
+		sycl::buffer<float, 1U> buf_a(a.data(), a.size());
+		sycl::buffer<float, 1U> buf_b(b.data(), b.size());
+		sycl::buffer<float, 1U> buf_c(c.data(), c.size());
+
+		gpu_queue.submit(
+			[&](sycl::handler& cgh) 
+			{
+				auto in_a = buf_a.get_access<sycl::access::mode::read>(cgh);
+				auto in_b = buf_b.get_access<sycl::access::mode::read>(cgh);
+				auto out_c = buf_c.get_access<sycl::access::mode::write>(cgh);
+
+				cgh.parallel_for<class Add>(sycl::range<1>(N), 
+					[=](sycl::id<1> index) 
+					{
+						// Kernel code 
+						out_c[index] = in_a[index] + in_b[index];
+					}
+				);
+			}
+		);
+	}
+
+	// local scope закрываетс€, sycl::buffer<float, 1U> , 
+	// выделенные на стеке, разрущаютс€ => передают доступ
+	// к данным std::vector<float> a, b, c обратно на CPU
+
+	for (const auto& v : c)
+	{
+		assert(v == 3.0);
+	}
+
+
+			gpu_queue.submit(
+			[&](sycl::handler& cgh) 
+			{
+				auto in_a  = buf_a.get_access<sycl::access::mode::read >(cgh);
+				auto in_b  = buf_b.get_access<sycl::access::mode::read >(cgh);
+				auto out_c = buf_c.get_access<sycl::access::mode::write>(cgh);
+
+				cgh.parallel_for<class Add>(sycl::range<1>(N), 
+					[=](sycl::id<1> index) 
+					{
+						// Kernel code 
+						out_c[index] = in_a[index] + in_b[index];
+					}
+				);
+			}
+		);
+
+
+
+}
+
+
+
 int main(int argc, char* argv[])
 {
 	get_devices_information();
@@ -175,6 +242,27 @@ int main(int argc, char* argv[])
 				// кажда€ группа аллоцирует GROUP_SIZE элементов. ¬опрос, как тут становитс€ пон€тно, сколько весит каждый элемент?
 				// в данном случае GROUP_SIZE не об€зано быть константой, это может быть динамическа€ переменна€
 				sycl::accessor<float, 1, sycl::access::mode::read_write, sycl::access::target::local> lmem_a(GROUP_SIZE, cgh);
+
+				enum work_item_size {
+					x, y
+				};
+
+				enum work_group_size {
+					x, y
+				};
+
+				constexpr auto work_groups_count_x = 10;
+				constexpr auto work_groups_count_y = 10;
+
+
+				auto local_range = sycl::range<2>(work_item_size::x,
+												  work_item_size::y);
+
+				auto global_range = sycl::range<2>(work_item_size::x * work_group_size::x,
+												   work_item_size::y * work_group_size::y);
+
+				auto nd_range = sycl::nd_range<2>(global_range, local_range);
+
 
 				cgh.parallel_for(sycl::nd_range<1>(sycl::range<1>(N), sycl::range<1>(GROUP_SIZE)),
 					[=](sycl::nd_item<1> nd_item) // Ќаибольшее количество информации о work group
